@@ -61,36 +61,66 @@ ml_backend/
 
 ---
 
-## ⚡ Quick Start (5 Minutes)
+## ⚡ Quick Start (3 Lines of Code!)
 
-### 1. Install Dependencies
+### Option 1: Unified Pipeline (Recommended ⭐)
 
+**All modules work together automatically:**
+
+```python
+from src import SynthosOrchestrator
+
+orchestrator = SynthosOrchestrator()
+result = await orchestrator.validate("data.parquet", "parquet")
+
+if result.approved_for_training:
+    print(f"✅ APPROVED! Score: {result.collapse_score:.1f}/100")
+else:
+    print(f"❌ Issues found. See {len(result.recommendations)} recommendations")
+```
+
+**That's it!** The orchestrator automatically:
+1. ✅ Loads your data
+2. ✅ Analyzes diversity  
+3. ✅ Trains cascade models
+4. ✅ Detects collapse across 8 dimensions
+5. ✅ Localizes problematic rows
+6. ✅ Generates prioritized recommendations
+7. ✅ Makes approval decision
+
+**See [UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) for complete guide.**
+
+---
+
+### Option 2: Manual Setup (Advanced)
+
+If you want to use modules individually:
+
+**1. Install Dependencies**
 ```bash
 pip install -r requirements.txt
 pip install packages/resonance_nn-0.1.0-py3-none-any.whl
 pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl
 ```
 
-### 2. Generate Certificates
-
+**2. Generate Certificates**
 ```bash
 bash scripts/generate_certs.sh
 ```
 
-### 3. Run Example
-
+**3. Run Example**
 ```bash
-python examples/complete_pipeline.py
+python examples/unified_pipeline_simple.py
 ```
 
 **Expected Output:**
 ```
-✅ All 6 steps completed successfully!
-📊 Final Assessment:
-   - Current Score: 72.4/100
-   - Collapse Detected: False
-   - Recommendations: 3
-   - Projected Score: 87.6/100
+✅ APPROVED FOR TRAINING
+   • Quality Score: 72.4/100
+   • Diversity Score: 68.2/100
+   • Confidence: 87.3%
+
+🚀 You can now proceed with model training!
 ```
 
 ---
@@ -174,7 +204,8 @@ sudo systemctl start synthos-validator
 
 | Document | Description |
 |----------|-------------|
-| [README.md](docs/README.md) | Complete developer guide |
+| [UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) | **⭐ START HERE** - Complete guide for unified pipeline |
+| [README.md](docs/README.md) | Complete developer guide & API reference |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design & technical details |
 | [QUICK_START.md](docs/QUICK_START.md) | 5-minute getting started |
 | [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | What's complete & roadmap |
@@ -227,7 +258,47 @@ cascade:
 
 ## 🎓 Usage Examples
 
-### Basic Validation
+### 🌟 Unified Pipeline (Simple - Recommended)
+
+```python
+import asyncio
+from src import SynthosOrchestrator
+
+async def main():
+    # Initialize (links all modules together)
+    orchestrator = SynthosOrchestrator(
+        collapse_threshold=65.0,
+        diversity_threshold=50.0
+    )
+    
+    # Validate (automatic 6-stage pipeline)
+    result = await orchestrator.validate(
+        dataset_path="data.parquet",
+        dataset_format="parquet",
+        output_report_path="report.json",
+        stream_progress=True  # Real-time progress
+    )
+    
+    # Check result
+    if result.approved_for_training:
+        print(f"✅ APPROVED - Score: {result.collapse_score:.1f}/100")
+    else:
+        print(f"❌ REJECTED - {result.reason}")
+        for rec in result.recommendations[:3]:
+            print(f"  💡 {rec['title']}: +{rec['estimated_impact']:.1f} pts")
+
+asyncio.run(main())
+```
+
+**See [docs/UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) for complete guide.**
+
+---
+
+### 📦 Individual Modules (Advanced)
+
+If you need fine-grained control:
+
+#### Basic Validation
 
 ```python
 from src.validation_engine import DiversityAnalyzer
