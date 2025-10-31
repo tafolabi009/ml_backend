@@ -1,9 +1,12 @@
-# Hardware Configuration for ML Backend
-# 4x NVIDIA H200 GPUs with 80GB memory each
+# Hardware Configuration for ML Validation Engine
+# 4x NVIDIA H100 (80GB each) = 320GB total GPU memory
+# Instance: a3-highgpu-4g on GCP (us-central1-b)
+# OS: Rocky Linux 8 with Nvidia driver 580
+# Storage: 500GB Hyperdisk Balanced + 8x375GB Local SSD (3TB total)
 
-gpu_config:
-  num_gpus: 4
-  gpu_type: "H200"
+gpus:
+  total: 4
+  model: "H100"
   memory_per_gpu_gb: 80
   total_memory_gb: 320
   
@@ -29,20 +32,62 @@ gpu_config:
 
 compute_limits:
   max_validation_cost_usd: 2000
-  cost_per_gpu_hour_usd: 4.0  # H200 cloud pricing
-  max_gpu_hours_per_validation: 500
+  cost_per_gpu_hour_usd: 7.11  # H100 on GCP ($44.36/hr ÷ 4 GPUs + overhead)
+  max_gpu_hours_per_validation: 280  # ~12 days at $2K budget
   
   # Automatic cost tracking
   enable_cost_tracking: true
   alert_threshold_usd: 1800
 
+# GCP Instance Configuration
+instance:
+  provider: "GCP"
+  type: "a3-highgpu-4g"
+  region: "us-central1-b"
+  zone: "us-central1-b"
+  cpus: 104  # vCPU
+  ram_gb: 936
+  cost_per_hour_usd: 44.36
+  cost_per_month_usd: 32383.85
+
+# Storage Configuration
+storage:
+  boot_disk:
+    type: "Hyperdisk Balanced"
+    size_gb: 500
+    iops: 6000
+    throughput_mbps: 890
+    cost_per_month_usd: 85.00  # $40 + $15 IOPS + $30 throughput
+  
+  local_ssd:
+    count: 8
+    type: "NVMe"
+    size_per_disk_gb: 375
+    total_gb: 3000
+    cost_per_month_usd: 240.00
+    mount_path: "/mnt/localssd"
+    use_for:
+      - "Training data cache"
+      - "Model checkpoints"
+      - "Temporary embeddings"
+      - "Signature library (HDF5)"
+
+# Operating System
+os:
+  name: "Rocky Linux"
+  version: "8"
+  nvidia_driver: "580"
+  cuda_version: "12.4"  # Latest for driver 580
+  cudnn_version: "9.0"
+
 training_config:
-  precision: "mixed_fp16"  # mixed_fp16, fp32, or bf16
+  precision: "bf16"  # BF16 recommended for H100 (better than FP16)
   use_gradient_checkpointing: true
   use_flash_attention: false  # NOT USED - no attention mechanism!
   use_fft_optimization: true  # FFT-based spectral processing
   compile_models: true  # torch.compile for speed
-  fft_backend: "cufft"  # CUDA FFT library for H200
+  fft_backend: "cufft"  # CUDA FFT library for H100
+  enable_tf32: true  # TensorFloat-32 on H100 for extra speed
   
 memory_optimization:
   gradient_accumulation_steps: 2

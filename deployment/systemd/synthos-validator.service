@@ -1,0 +1,29 @@
+[Unit]
+Description=Synthos ML Validation Service
+After=network.target
+
+[Service]
+Type=simple
+User=synthos
+Group=synthos
+WorkingDirectory=/home/synthos/workspace/ml_backend
+Environment="PATH=/home/synthos/workspace/ml_backend/venv/bin"
+Environment="CUDA_VISIBLE_DEVICES=0,1,2,3"
+Environment="ML_DATA_DIR=/mnt/localssd"
+Environment="SIGNATURE_LIBRARY_PATH=/mnt/localssd/signatures"
+ExecStart=/home/synthos/workspace/ml_backend/venv/bin/python src/grpc_services/validation_server.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/synthos/validator.log
+StandardError=append:/var/log/synthos/validator-error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
