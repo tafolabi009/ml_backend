@@ -1,0 +1,145 @@
+# ML Model Configuration
+# Uses Resonance NN (FFT-based Spectral) + Temporal Eigenstate Networks
+# NO ATTENTION MECHANISM - Pure spectral processing via FFT
+
+architecture_config:
+  # Primary: Resonance NN (O(n log n) FFT-based, NO attention)
+  primary_architecture: "resonance_nn"
+  architecture_type: "spectral_fft"  # FFT-based, not transformer-based
+  
+  # Secondary: Temporal Eigenstate Networks (for temporal/sequence data)
+  secondary_architecture: "temporal_eigenstate"
+  
+  # Automatically choose based on data type
+  auto_select_architecture: true
+  
+  # Key: These use AdvancedSpectralGating (ASG) not attention!
+  uses_attention: false
+  uses_fft: true
+  uses_spectral_processing: true
+
+resonance_nn_config:
+  # Model sizes for multi-scale cascade
+  # Uses: HierarchicalFFT + MultiHeadFrequencyLayer + AdvancedSpectralGating
+  
+  tier_1_micro:
+    size: "tiny"
+    params_m: 76
+    context_length: 16384
+    embed_dim: 256
+    hidden_dim: 1024
+    num_layers: 6
+    num_frequency_heads: 8  # NOT attention heads - frequency bands
+    training_rows: 2000000
+    fft_dim: 256
+    
+  tier_2_mini:
+    size: "small"
+    params_m: 454
+    context_length: 65536
+    embed_dim: 512
+    hidden_dim: 2048
+    num_layers: 12
+    num_frequency_heads: 16
+    training_rows: 10000000
+    fft_dim: 512
+    
+  tier_3_medium:
+    size: "base"
+    params_m: 983
+    context_length: 131072
+    embed_dim: 768
+    hidden_dim: 3072
+    num_layers: 12
+    num_frequency_heads: 12
+    training_rows: 20000000
+    fft_dim: 768
+
+temporal_eigenstate_config:
+  # For time-series and sequential data
+  # Uses: TemporalFlowCell + EigenstateAttention + ResonanceBlock
+  use_for_temporal_data: true
+  eigenstate_dimension: 512
+  num_eigenstates: 128
+  temporal_resolution: "adaptive"
+  use_hierarchical: true  # HierarchicalTEN for multi-scale
+  
+  # Eigenstate-specific parameters
+  resonance_coupling: 0.1
+  temporal_flow_steps: 16
+  eigenstate_decay: 0.99
+
+cascade_training:
+  # Multi-scale validation strategy
+  num_variants_per_tier:
+    tier_1: 10
+    tier_2: 5
+    tier_3: 3
+  
+  total_models: 18  # 10 + 5 + 3
+  
+  # Training hyperparameters
+  learning_rate: 1.0e-4
+  warmup_steps: 1000
+  max_epochs_per_model: 10
+  early_stopping_patience: 3
+  
+  # Optimization
+  optimizer: "adamw"
+  weight_decay: 0.01
+  gradient_clip_norm: 1.0
+  
+  # Scheduler
+  scheduler: "cosine_with_warmup"
+  min_lr: 1.0e-6
+
+collapse_detection:
+  # Multi-dimensional scoring
+  dimensions:
+    - "distribution_fidelity"
+    - "correlation_preservation"
+    - "diversity_retention"
+    - "rare_pattern_handling"
+    - "temporal_stability"
+    - "semantic_coherence"
+  
+  # Thresholds
+  dimension_threshold: 70  # Score must be >= 70 to pass
+  overall_risk_threshold: 25  # Overall risk score must be < 25
+  
+  # Collapse types
+  collapse_categories:
+    type_a: "distribution_collapse"
+    type_b: "correlation_collapse"
+    type_c: "rare_pattern_collapse"
+    type_d: "temporal_collapse"
+    type_e: "semantic_collapse"
+
+sampling_strategy:
+  # Stratified diversity sampling (NOT random)
+  method: "stratified_diversity"
+  sample_size_rows: 20000000  # 20M rows
+  
+  # Clustering for stratification
+  clustering_method: "hdbscan"  # Density-based
+  min_cluster_size: 1000
+  
+  # Rare pattern handling
+  rare_pattern_threshold: 0.01  # <1% occurrence
+  rare_pattern_oversample_factor: 3
+  
+  # Outlier inclusion
+  include_outliers: true
+  outlier_percentile: 0.001  # Top 0.1%
+
+scaling_laws:
+  # Extrapolation from cascade to billion-parameter models
+  model: "power_law"  # Performance = A * N^B + C
+  min_data_points: 15  # Need at least 15 models
+  confidence_level: 0.95
+  
+  # Target extrapolation
+  target_model_sizes:
+    - 1000000000    # 1B parameters
+    - 10000000000   # 10B parameters
+    - 100000000000  # 100B parameters

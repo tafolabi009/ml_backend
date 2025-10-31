@@ -1,0 +1,385 @@
+syntax = "proto3";
+
+package validation;
+
+// ============================================================================
+// Validation Engine Service
+// Handles Phase 2-6 of the validation pipeline
+// ============================================================================
+
+service ValidationEngine {
+  // Phase 2: Analyze diversity and create stratified sample
+  rpc AnalyzeDiversity(DiversityRequest) returns (DiversityResponse);
+  
+  // Phase 3: Pre-screen against collapse signature library
+  rpc PreScreenRisk(PreScreenRequest) returns (PreScreenResponse);
+  
+  // Phase 4: Multi-scale cascade training (STREAMING every 10s)
+  rpc TrainCascade(CascadeRequest) returns (stream CascadeProgress);
+  
+  // Phase 5: Get final predictions with confidence intervals
+  rpc GetPredictions(PredictionRequest) returns (PredictionResponse);
+}
+
+// ============================================================================
+// Collapse Engine Service  
+// Handles collapse detection and localization
+// ============================================================================
+
+service CollapseEngine {
+  // Phase 5: Detect collapse in cascade results
+  rpc DetectCollapse(CollapseRequest) returns (CollapseResponse);
+  
+  // Phase 6: Pinpoint problematic data regions
+  rpc LocalizeProblems(LocalizationRequest) returns (LocalizationResponse);
+  
+  // Phase 6: Generate actionable recommendations
+  rpc GenerateRecommendations(RecommendationRequest) returns (RecommendationResponse);
+}
+
+// ============================================================================
+// Phase 2: Diversity Analysis
+// ============================================================================
+
+message DiversityRequest {
+  string dataset_id = 1;
+  string s3_path = 2;
+  int64 row_count = 3;
+  DataFormat format = 4;
+}
+
+message DiversityResponse {
+  string dataset_id = 1;
+  string sample_s3_path = 2;
+  DiversityMetrics metrics = 3;
+  repeated Cluster clusters = 4;
+  int32 sampling_confidence = 5;
+  ErrorInfo error = 6;  // Error handling
+}
+
+message DiversityMetrics {
+  double entropy = 1;
+  double gini_coefficient = 2;
+  int32 cluster_count = 3;
+  repeated CorrelationPair correlations = 4;
+  double rare_pattern_percentage = 5;
+  double outlier_percentage = 6;
+}
+
+message Cluster {
+  int32 cluster_id = 1;
+  int64 size = 2;
+  repeated double centroid = 3;
+  double density = 4;
+}
+
+message CorrelationPair {
+  string column_a = 1;
+  string column_b = 2;
+  double correlation = 3;
+}
+
+// ============================================================================
+// Phase 3: Pre-Screening
+// ============================================================================
+
+message PreScreenRequest {
+  string dataset_id = 1;
+  DiversityMetrics diversity = 2;
+}
+
+message PreScreenResponse {
+  string dataset_id = 1;
+  int32 pre_risk_score = 2;
+  repeated SignatureMatch matches = 3;
+  bool should_proceed = 4;
+  string recommendation = 5;
+  ErrorInfo error = 6;
+}
+
+message SignatureMatch {
+  string signature_id = 1;
+  string collapse_type = 2;
+  double similarity = 3;
+  string historical_outcome = 4;
+}
+
+// ============================================================================
+// Phase 4: Cascade Training (STREAMING every 10s)
+// ============================================================================
+
+message CascadeRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string sample_s3_path = 3;
+  CascadeConfig config = 4;
+}
+
+message CascadeConfig {
+  repeated ModelTier tiers = 1;
+  string target_architecture = 2;  // "resonance_nn" or "temporal_eigenstate"
+  int64 target_model_size = 3;
+  int32 vocab_size = 4;
+}
+
+message ModelTier {
+  int32 tier_number = 1;
+  int64 model_size = 2;
+  int32 num_variants = 3;
+  int64 training_rows = 4;
+}
+
+message CascadeProgress {
+  string dataset_id = 1;
+  string validation_id = 2;
+  int32 current_tier = 3;
+  int32 current_variant = 4;
+  int32 models_completed = 5;
+  int32 models_total = 6;
+  double progress_percent = 7;
+  
+  // Real-time metrics (updated every 10s)
+  double current_loss = 8;
+  map<int32, double> gpu_utilization = 9;
+  string estimated_completion = 10;
+  
+  // When a model completes
+  ModelResult result = 11;
+  
+  ErrorInfo error = 12;
+}
+
+message ModelResult {
+  int32 tier = 1;
+  int32 variant = 2;
+  int64 model_size = 3;
+  
+  // Training metrics
+  double training_loss = 4;
+  double validation_loss = 5;
+  double training_time_seconds = 6;
+  int32 convergence_epoch = 7;
+  
+  // Collapse detection
+  bool collapse_detected = 8;
+  
+  // FFT/Spectral metrics (NO attention metrics!)
+  SpectralMetrics spectral_metrics = 9;
+  
+  // Gradient statistics
+  GradientStats gradient_stats = 10;
+  
+  // Loss curve
+  repeated double loss_curve = 11;
+}
+
+message SpectralMetrics {
+  double spectral_energy = 1;
+  double spectral_entropy = 2;
+  double frequency_concentration = 3;
+  double representation_variance = 4;
+}
+
+message GradientStats {
+  double total_norm = 1;
+  double max_grad = 2;
+  double min_grad = 3;
+  double grad_range = 4;
+}
+
+// ============================================================================
+// Phase 5: Predictions
+// ============================================================================
+
+message PredictionRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  repeated ModelResult cascade_results = 3;
+  int64 target_model_size = 4;
+}
+
+message PredictionResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  
+  // Performance prediction
+  double predicted_accuracy = 3;
+  ConfidenceInterval confidence = 4;
+  
+  // Scaling law coefficients
+  ScalingLawCoefficients scaling = 5;
+  
+  // Final risk score
+  int32 final_risk_score = 6;
+  
+  ErrorInfo error = 7;
+}
+
+message ConfidenceInterval {
+  double lower_bound = 1;
+  double upper_bound = 2;
+  double confidence_level = 3;
+}
+
+message ScalingLawCoefficients {
+  double a = 1;  // Performance = A * N^B + C
+  double b = 2;
+  double c = 3;
+  double r_squared = 4;  // Fit quality
+}
+
+// ============================================================================
+// Phase 5: Collapse Detection
+// ============================================================================
+
+message CollapseRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  repeated ModelResult cascade_results = 3;
+  DiversityMetrics original_diversity = 4;
+}
+
+message CollapseResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  
+  bool collapse_detected = 3;
+  string collapse_type = 4;  // "Type A", "Type B", etc.
+  string severity = 5;  // "low", "medium", "high"
+  
+  // Multi-dimensional scores
+  repeated DimensionScore dimensions = 6;
+  
+  // Root causes
+  repeated RootCause root_causes = 7;
+  
+  ErrorInfo error = 8;
+}
+
+message DimensionScore {
+  string dimension = 1;
+  int32 score = 2;
+  int32 threshold = 3;
+  bool passed = 4;
+}
+
+message RootCause {
+  string cause = 1;
+  double percentage = 2;
+  string description = 3;
+}
+
+// ============================================================================
+// Phase 6: Localization
+// ============================================================================
+
+message LocalizationRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string sample_s3_path = 3;
+  repeated ModelResult cascade_results = 4;
+  CollapseResponse collapse_info = 5;
+}
+
+message LocalizationResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  
+  repeated ProblematicRegion regions = 3;
+  repeated AblationResult ablations = 4;
+  
+  ErrorInfo error = 5;
+}
+
+message ProblematicRegion {
+  string region_id = 1;
+  int64 row_start = 2;
+  int64 row_end = 3;
+  string issue_type = 4;
+  double impact_score = 5;
+  repeated string affected_columns = 6;
+}
+
+message AblationResult {
+  string region_id = 1;
+  int32 risk_score_before = 2;
+  int32 risk_score_after = 3;
+  int32 improvement = 4;
+  bool hypothesis_confirmed = 5;
+}
+
+// ============================================================================
+// Phase 6: Recommendations
+// ============================================================================
+
+message RecommendationRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  LocalizationResponse localization = 3;
+  CollapseResponse collapse_info = 4;
+}
+
+message RecommendationResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  
+  repeated Recommendation recommendations = 3;
+  CombinedImpact combined_impact = 4;
+  
+  ErrorInfo error = 5;
+}
+
+message Recommendation {
+  int32 priority = 1;
+  string category = 2;
+  string title = 3;
+  string description = 4;
+  
+  Impact impact = 5;
+  Implementation implementation = 6;
+}
+
+message Impact {
+  int32 current_risk_score = 1;
+  int32 expected_risk_score = 2;
+  int32 improvement = 3;
+}
+
+message Implementation {
+  string method = 1;
+  int64 affected_rows = 2;
+  string estimated_time = 3;
+  string script_url = 4;  // S3 URL to generated fix script
+}
+
+message CombinedImpact {
+  int32 current_risk_score = 1;
+  int32 expected_risk_score = 2;
+  int32 total_improvement = 3;
+  string estimated_time = 4;
+}
+
+// ============================================================================
+// Common Types
+// ============================================================================
+
+enum DataFormat {
+  UNKNOWN_FORMAT = 0;
+  CSV = 1;
+  JSON = 2;
+  JSONL = 3;
+  PARQUET = 4;
+  HDF5 = 5;
+  ARROW = 6;
+  FEATHER = 7;
+  EXCEL = 8;
+  TSV = 9;
+}
+
+message ErrorInfo {
+  int32 code = 1;  // Error code
+  string message = 2;  // Human-readable error
+  string details = 3;  // Stack trace or additional details
+  bool retryable = 4;  // Can the request be retried?
+  int32 retry_after_seconds = 5;  // Suggested retry delay
+}

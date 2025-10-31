@@ -1,0 +1,62 @@
+# Hardware Configuration for ML Backend
+# 4x NVIDIA H200 GPUs with 80GB memory each
+
+gpu_config:
+  num_gpus: 4
+  gpu_type: "H200"
+  memory_per_gpu_gb: 80
+  total_memory_gb: 320
+  
+  # Multi-GPU strategy
+  strategy: "data_parallel"  # data_parallel, model_parallel, or pipeline_parallel
+  
+  # GPU allocation per tier (4 GPUs total)
+  tier_allocation:
+    tier_1_micro:  # 76M parameter models (tiny)
+      gpus: [0, 1]  # Use 2 GPUs
+      batch_size: 256  # Larger batch for FFT efficiency
+      parallel_models: 10  # Train 10 models in parallel
+    
+    tier_2_mini:  # 454M parameter models (small)
+      gpus: [0, 1, 2]  # Use 3 GPUs
+      batch_size: 128
+      parallel_models: 5
+    
+    tier_3_medium:  # 983M parameter models (base)
+      gpus: [0, 1, 2, 3]  # Use all 4 GPUs
+      batch_size: 64
+      parallel_models: 3
+
+compute_limits:
+  max_validation_cost_usd: 2000
+  cost_per_gpu_hour_usd: 4.0  # H200 cloud pricing
+  max_gpu_hours_per_validation: 500
+  
+  # Automatic cost tracking
+  enable_cost_tracking: true
+  alert_threshold_usd: 1800
+
+training_config:
+  precision: "mixed_fp16"  # mixed_fp16, fp32, or bf16
+  use_gradient_checkpointing: true
+  use_flash_attention: false  # NOT USED - no attention mechanism!
+  use_fft_optimization: true  # FFT-based spectral processing
+  compile_models: true  # torch.compile for speed
+  fft_backend: "cufft"  # CUDA FFT library for H200
+  
+memory_optimization:
+  gradient_accumulation_steps: 2
+  max_memory_usage_percent: 90
+  enable_cpu_offload: false  # We have enough GPU memory
+  clear_cache_between_models: true
+
+distributed_config:
+  backend: "nccl"  # NVIDIA's optimized backend
+  init_method: "env://"
+  world_size: 4  # 4 GPUs
+  
+performance_targets:
+  tier_1_time_minutes: 30    # All 10 micro models
+  tier_2_time_minutes: 180   # All 5 mini models (3 hours)
+  tier_3_time_minutes: 1440  # All 3 medium models (24 hours)
+  total_validation_hours: 30  # Target: 30 hours total
