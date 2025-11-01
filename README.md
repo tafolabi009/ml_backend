@@ -5,7 +5,37 @@
 [![Status](https://img.shields.io/badge/status-production--ready-green)]()
 [![GPU](https://img.shields.io/badge/GPU-4x%20H100-blue)]()
 [![Scale](https://img.shields.io/badge/scale-1B%2B%20rows-purple)]()
+[![Integration](https://img.shields.io/badge/integration-unified-brightgreen)]()
 [![Cost](https://img.shields.io/badge/cost-%2444.36%2Fhr-orange)]()
+
+---
+
+## 🎯 Unified Pipeline - All Modules Work as One!
+
+**NEW: All 6 modules now integrated through a single orchestrator!**
+
+```python
+from src import SynthosOrchestrator
+
+# Single entry point - automatic pipeline
+orchestrator = SynthosOrchestrator()
+result = await orchestrator.validate("data.parquet", "parquet")
+
+# Automatic 6-stage validation:
+# ✅ Stage 1: Data Loading
+# ✅ Stage 2: Diversity Analysis  
+# ✅ Stage 3: Cascade Training
+# ✅ Stage 4: Collapse Detection (8 dimensions)
+# ✅ Stage 5: Problem Localization
+# ✅ Stage 6: Recommendations
+
+if result.approved_for_training:
+    print(f"✅ APPROVED! Score: {result.collapse_score:.1f}/100")
+else:
+    print(f"❌ Issues: {result.reason}")
+```
+
+**See [INTEGRATION_COMPLETE.md](INTEGRATION_COMPLETE.md) for details!**
 
 ---
 
