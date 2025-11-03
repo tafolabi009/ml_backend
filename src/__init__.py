@@ -1,47 +1,22 @@
-"""
-Synthos ML Validation Engine
-Main package initialization
+"""src package for Synthos Validation Engine.
 
-Primary Interface:
-    SynthosOrchestrator - Main entry point that links all modules together
-    
-Example:
-    from src import SynthosOrchestrator
-    
-    orchestrator = SynthosOrchestrator()
-    result = await orchestrator.validate("data.parquet", "parquet")
-    
-    if result.approved_for_training:
-        print("✅ Ready for training!")
+This file purposefully keeps top-level imports minimal so importing
+``src`` in lightweight environments (CI, linters) won't try to import
+heavy ML dependencies like ``torch`` or ``pandas``.
+
+Import concrete modules explicitly when you need them, e.g.::
+
+    from src.orchestrator import SynthosOrchestrator
+
+This makes the package safe to import in CI jobs that only need
+to verify packaging, metadata, or run quick unit tests.
 """
 
 __version__ = "1.0.0"
 
-# PRIMARY INTERFACE (use this for unified pipeline!)
-from src.orchestrator import SynthosOrchestrator, ValidationResult
-
-# Individual modules (for advanced use only)
-from src.data_processors.dataset_loader import DatasetLoader
-from src.validation_engine.diversity_analyzer import DiversityAnalyzer
-from src.validation_engine.cascade_trainer import CascadeTrainer
-from src.collapse_engine.collapse_detector import CollapseDetector
-from src.collapse_engine.signature_library import SignatureLibrary
-from src.collapse_engine.gradient_localizer import GradientLocalizer
-from src.collapse_engine.recommendation_engine import RecommendationEngine
-from src.utils.gpu_optimizer import GPUOptimizer
-
+# Keep a minimal public surface. Heavy submodules should be imported
+# explicitly by callers to avoid pulling large optional dependencies
+# at import time.
 __all__ = [
-    # PRIMARY INTERFACE (use this!)
-    'SynthosOrchestrator',
-    'ValidationResult',
-    
-    # Individual modules (advanced)
-    'DatasetLoader',
-    'DiversityAnalyzer',
-    'CascadeTrainer',
-    'CollapseDetector',
-    'SignatureLibrary',
-    'GradientLocalizer',
-    'RecommendationEngine',
-    'GPUOptimizer',
+    "__version__",
 ]
