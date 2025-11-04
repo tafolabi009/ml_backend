@@ -24,11 +24,15 @@ import asyncio
 from datetime import datetime
 
 # Import our custom architectures (NO transformers!)
-import resonance_nn
-from src.model import (
+from src.model_architectures import (
+    create_resonance_model,
+    create_temporal_eigenstate_model,
+    get_model_info,
+    SpectralLanguageModel,
     TemporalEigenstateNetwork,
     HierarchicalTEN,
-    TemporalEigenstateConfig
+    TemporalEigenstateConfig,
+    MODEL_CONFIGS
 )
 
 logger = logging.getLogger(__name__)
@@ -152,7 +156,7 @@ class CascadeTrainer:
         # Create models
         models = []
         for variant_id in range(num_variants):
-            model = resonance_nn.create_spectral_lm('tiny', vocab_size=vocab_size)
+            model = create_resonance_model('tiny', vocab_size=vocab_size)
             models.append((variant_id, model))
         
         # Train in parallel batches (5 per GPU)
@@ -200,7 +204,7 @@ class CascadeTrainer:
         
         models = []
         for variant_id in range(num_variants):
-            model = resonance_nn.create_spectral_lm('small', vocab_size=vocab_size)
+            model = create_resonance_model('small', vocab_size=vocab_size)
             models.append((variant_id, model))
         
         # Train in parallel (distribute across 3 GPUs)
@@ -242,7 +246,7 @@ class CascadeTrainer:
         
         models = []
         for variant_id in range(num_variants):
-            model = resonance_nn.create_spectral_lm('base', vocab_size=vocab_size)
+            model = create_resonance_model('base', vocab_size=vocab_size)
             models.append((variant_id, model))
         
         # Train sequentially (each uses all 4 GPUs)

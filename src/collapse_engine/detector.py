@@ -604,8 +604,10 @@ class CollapseDetector:
         from sklearn.model_selection import train_test_split
         
         # Create binary classification task (synthetic vs original)
-        X = np.vstack([synthetic[:10000], original[:10000]])
-        y = np.array([0] * 10000 + [1] * 10000)
+        # Use min samples available to avoid dimension mismatches
+        n_samples = min(len(synthetic), len(original), 10000)
+        X = np.vstack([synthetic[:n_samples], original[:n_samples]])
+        y = np.array([0] * n_samples + [1] * n_samples)
         
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
         

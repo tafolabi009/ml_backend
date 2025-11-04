@@ -34,16 +34,23 @@ class DatasetFormat(Enum):
 
 @dataclass
 class DatasetMetadata:
-    """Metadata about loaded dataset"""
+    """Metadata about a dataset"""
     format: DatasetFormat
-    total_rows: int
-    total_columns: int
+    file_size_mb: float
+    estimated_rows: int
+    estimated_columns: int
     column_names: List[str]
     column_types: Dict[str, str]
-    file_size_mb: float
-    estimated_memory_mb: float
-    has_nulls: bool
-    null_counts: Dict[str, int]
+    sample_data: Optional[pd.DataFrame] = None
+    
+    # Aliases for backward compatibility
+    @property
+    def num_rows(self) -> int:
+        return self.estimated_rows
+    
+    @property
+    def num_columns(self) -> int:
+        return self.estimated_columns
 
 
 class DatasetLoader:
@@ -139,6 +146,21 @@ class DatasetLoader:
             logger.error(f"Failed to load {file_path}: {e}")
             raise
     
+    async def load_dataset(self, file_path: Union[str, Path], format_type: str) -> pd.DataFrame:
+        """
+        Async wrapper for load_full - for compatibility with async orchestrator.
+        Actual loading is synchronous (pandas I/O is not async), but this allows
+        it to be called with await in async contexts.
+        
+        Args:
+            file_path: Path to dataset file
+            format_type: Format type (for compatibility, will auto-detect)
+            
+        Returns:
+            DataFrame with loaded data
+        """
+        return self.load_full(file_path)
+    
     def stream_chunks(
         self, 
         file_path: Union[str, Path],
@@ -193,14 +215,11 @@ class DatasetLoader:
         
         return DatasetMetadata(
             format=DatasetFormat.PARQUET,
-            total_rows=total_rows,
-            total_columns=len(column_names),
+            estimated_rows=total_rows,
+            estimated_columns=len(column_names),
             column_names=column_names,
             column_types=column_types,
-            file_size_mb=file_size_mb,
-            estimated_memory_mb=estimated_memory_mb,
-            has_nulls=True,  # Would need to scan to determine
-            null_counts={}
+            file_size_mb=file_size_mb
         )
     
     def _get_csv_metadata(self, file_path: Path) -> DatasetMetadata:
@@ -222,14 +241,11 @@ class DatasetLoader:
         
         return DatasetMetadata(
             format=DatasetFormat.CSV,
-            total_rows=total_rows,
-            total_columns=len(column_names),
+            estimated_rows=total_rows,
+            estimated_columns=len(column_names),
             column_names=column_names,
             column_types=column_types,
-            file_size_mb=file_size_mb,
-            estimated_memory_mb=estimated_memory_mb,
-            has_nulls=any(count > 0 for count in null_counts.values()),
-            null_counts=null_counts
+            file_size_mb=file_size_mb
         )
     
     def _get_hdf5_metadata(self, file_path: Path) -> DatasetMetadata:
@@ -247,14 +263,11 @@ class DatasetLoader:
             
             return DatasetMetadata(
                 format=DatasetFormat.HDF5,
-                total_rows=total_rows,
-                total_columns=total_columns,
+                estimated_rows=total_rows,
+                estimated_columns=total_columns,
                 column_names=[f"col_{i}" for i in range(total_columns)],
                 column_types={"all": str(dataset.dtype)},
-                file_size_mb=file_size_mb,
-                estimated_memory_mb=estimated_memory_mb,
-                has_nulls=False,
-                null_counts={}
+                file_size_mb=file_size_mb
             )
     
     def _get_json_metadata(
@@ -283,14 +296,11 @@ class DatasetLoader:
         
         return DatasetMetadata(
             format=format_type,
-            total_rows=total_rows,
-            total_columns=len(column_names),
+            estimated_rows=total_rows,
+            estimated_columns=len(column_names),
             column_names=column_names,
             column_types=column_types,
-            file_size_mb=file_size_mb,
-            estimated_memory_mb=estimated_memory_mb,
-            has_nulls=sample.isnull().any().any(),
-            null_counts=sample.isnull().sum().to_dict()
+            file_size_mb=file_size_mb
         )
     
     def _get_generic_metadata(
@@ -303,14 +313,11 @@ class DatasetLoader:
         
         return DatasetMetadata(
             format=format_type,
-            total_rows=len(df),
-            total_columns=len(df.columns),
+            estimated_rows=len(df),
+            estimated_columns=len(df.columns),
             column_names=df.columns.tolist(),
             column_types={col: str(dtype) for col, dtype in df.dtypes.items()},
-            file_size_mb=file_path.stat().st_size / (1024 * 1024),
-            estimated_memory_mb=df.memory_usage(deep=True).sum() / (1024 * 1024),
-            has_nulls=df.isnull().any().any(),
-            null_counts=df.isnull().sum().to_dict()
+            file_size_mb=file_path.stat().st_size / (1024 * 1024)
         )
     
     def _load_hdf5(self, file_path: Path) -> pd.DataFrame:

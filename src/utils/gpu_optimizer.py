@@ -57,11 +57,35 @@ class GPUOptimizer:
     Targets >80% utilization across 4x H200 GPUs.
     """
     
-    def __init__(self, config: Optional[OptimizationConfig] = None):
-        self.config = config or OptimizationConfig()
+    def __init__(
+        self, 
+        config: Optional[OptimizationConfig] = None,
+        # Convenience parameters (will be used if config is None)
+        memory_fraction: Optional[float] = None,
+        enable_mixed_precision: Optional[bool] = None,
+        use_gpu: bool = True
+    ):
+        # Handle both config object and convenience parameters
+        if config is None:
+            config = OptimizationConfig()
+            if enable_mixed_precision is not None:
+                config.use_mixed_precision = enable_mixed_precision
+        
+        self.config = config
+        self.use_gpu = use_gpu and torch.cuda.is_available()
+        
+        # Only apply GPU settings if GPU is available
+        if not self.use_gpu:
+            logger.info("GPUOptimizer running in CPU mode")
+            self.scaler = None
+            return
+        
+        # Set memory fraction if specified
+        if memory_fraction is not None and self.use_gpu:
+            torch.cuda.set_per_process_memory_fraction(memory_fraction)
         
         # Enable TF32 for faster matrix operations on Ampere+
-        if self.config.tf32_enabled:
+        if self.config.tf32_enabled and self.use_gpu:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
         
@@ -70,13 +94,14 @@ class GPUOptimizer:
             torch.backends.cudnn.benchmark = True
         
         # Initialize grad scaler for mixed precision
-        if self.config.use_mixed_precision:
+        if self.config.use_mixed_precision and self.use_gpu:
             self.scaler = GradScaler()
         else:
             self.scaler = None
         
         logger.info(f"GPUOptimizer initialized: {self.config.precision} precision, "
-                   f"checkpointing={'ON' if self.config.gradient_checkpointing else 'OFF'}")
+                   f"checkpointing={'ON' if self.config.gradient_checkpointing else 'OFF'}, "
+                   f"GPU={'ON' if self.use_gpu else 'OFF (CPU mode)'}")
     
     def optimize_model(self, model: nn.Module, distributed: bool = False) -> nn.Module:
         """

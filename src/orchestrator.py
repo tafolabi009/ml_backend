@@ -32,10 +32,10 @@ import pandas as pd
 from src.data_processors.dataset_loader import DatasetLoader
 from src.validation_engine.diversity_analyzer import DiversityAnalyzer
 from src.validation_engine.cascade_trainer import CascadeTrainer
-from src.collapse_engine.collapse_detector import CollapseDetector
+from src.collapse_engine.detector import CollapseDetector
 from src.collapse_engine.signature_library import SignatureLibrary
-from src.collapse_engine.gradient_localizer import GradientLocalizer
-from src.collapse_engine.recommendation_engine import RecommendationEngine
+from src.collapse_engine.localizer import CollapseLocalizer
+from src.collapse_engine.recommender import RecommendationEngine
 from src.utils.gpu_optimizer import GPUOptimizer
 
 logging.basicConfig(level=logging.INFO)
@@ -175,7 +175,8 @@ class SynthosOrchestrator:
         enable_mixed_precision: bool = True,
         collapse_threshold: float = 65.0,
         diversity_threshold: float = 50.0,
-        use_cache: bool = True
+        use_cache: bool = True,
+        skip_cascade_training: bool = False  # Skip expensive cascade training for testing
     ):
         """
         Initialize orchestrator and all sub-modules.
@@ -186,12 +187,14 @@ class SynthosOrchestrator:
             collapse_threshold: Score below this triggers rejection (0-100)
             diversity_threshold: Minimum diversity score required
             use_cache: Cache intermediate results for faster re-runs
+            skip_cascade_training: Skip cascade training (useful for CPU testing)
         """
         logger.info("🚀 Initializing Synthos Validation Engine...")
         
         self.collapse_threshold = collapse_threshold
         self.diversity_threshold = diversity_threshold
         self.use_cache = use_cache
+        self.skip_cascade_training = skip_cascade_training
         
         # Initialize GPU optimizer first
         self.gpu_optimizer = GPUOptimizer(
@@ -203,10 +206,10 @@ class SynthosOrchestrator:
         logger.info("📦 Loading modules...")
         self.dataset_loader = DatasetLoader()
         self.diversity_analyzer = DiversityAnalyzer()
-        self.cascade_trainer = CascadeTrainer()
+        self.cascade_trainer = None  # Initialized per validation
         self.collapse_detector = CollapseDetector()
         self.signature_library = SignatureLibrary()
-        self.gradient_localizer = GradientLocalizer()
+        self.collapse_localizer = CollapseLocalizer()
         self.recommendation_engine = RecommendationEngine()
         
         # Metrics tracking
@@ -305,51 +308,70 @@ class SynthosOrchestrator:
         diversity_time = asyncio.get_event_loop().time() - stage_start
         
         if stream_progress:
-            print(f"📊 Diversity Score: {diversity_result['overall_score']:.2f}/100")
-            print(f"   - Semantic: {diversity_result['semantic_diversity']:.2f}")
-            print(f"   - Statistical: {diversity_result['statistical_diversity']:.2f}")
-            print(f"   - Structural: {diversity_result['structural_diversity']:.2f}")
+            print(f"📊 Diversity Score: {diversity_result.overall_score:.2f}/100")
+            print(f"   - Semantic: {diversity_result.dimension_scores.get('semantic_diversity', 0):.2f}")
+            print(f"   - Statistical: {diversity_result.dimension_scores.get('statistical_diversity', 0):.2f}")
+            print(f"   - Structural: {diversity_result.dimension_scores.get('structural_diversity', 0):.2f}")
             print(f"⏱️  Completed in {diversity_time:.2f}s")
         
         # Check diversity threshold
-        diversity_score = diversity_result['overall_score']
+        diversity_score = diversity_result.overall_score
         if diversity_score < self.diversity_threshold:
             logger.warning(f"⚠️ Low diversity: {diversity_score:.1f} < {self.diversity_threshold}")
         
         # ============================================================
         # STAGE 3: CASCADE TRAINING
         # ============================================================
-        if stream_progress:
-            print("\n" + "="*60)
-            print("STAGE 3/6: TRAINING CASCADE MODELS")
-            print("="*60)
-        
-        stage_start = asyncio.get_event_loop().time()
-        
-        # Convert dataset to tensor format
-        if isinstance(dataset, pd.DataFrame):
-            # Extract numeric columns
-            numeric_cols = dataset.select_dtypes(include=[np.number]).columns
-            data_tensor = torch.tensor(dataset[numeric_cols].values, dtype=torch.float32)
+        if self.skip_cascade_training:
+            if stream_progress:
+                print("\n" + "="*60)
+                print("STAGE 3/6: CASCADE TRAINING (SKIPPED)")
+                print("="*60)
+                print("⚠️  Cascade training skipped (CPU test mode)")
+            
+            cascade_time = 0
+            num_models = 0
+            cascade_trained = False
+            
+            # Convert dataset to tensor for later stages
+            if isinstance(dataset, pd.DataFrame):
+                numeric_cols = dataset.select_dtypes(include=[np.number]).columns
+                data_tensor = torch.tensor(dataset[numeric_cols].values, dtype=torch.float32)
+            else:
+                data_tensor = torch.tensor(dataset, dtype=torch.float32)
         else:
-            data_tensor = torch.tensor(dataset, dtype=torch.float32)
-        
-        # Train cascade
-        cascade_result = await self.cascade_trainer.train_cascade(
-            data_tensor,
-            num_tiers=3,
-            models_per_tier=[10, 5, 3]
-        )
-        
-        cascade_time = asyncio.get_event_loop().time() - stage_start
-        num_models = sum(cascade_result['models_per_tier'].values())
-        
-        if stream_progress:
-            print(f"🎯 Trained {num_models} models across 3 tiers")
-            print(f"   - Tier 1 (tiny): {cascade_result['models_per_tier']['tier_1']} models")
-            print(f"   - Tier 2 (small): {cascade_result['models_per_tier']['tier_2']} models")
-            print(f"   - Tier 3 (base): {cascade_result['models_per_tier']['tier_3']} models")
-            print(f"⏱️  Completed in {cascade_time:.2f}s")
+            if stream_progress:
+                print("\n" + "="*60)
+                print("STAGE 3/6: TRAINING CASCADE MODELS")
+                print("="*60)
+            
+            stage_start = asyncio.get_event_loop().time()
+            
+            # Convert dataset to tensor format
+            if isinstance(dataset, pd.DataFrame):
+                # Extract numeric columns
+                numeric_cols = dataset.select_dtypes(include=[np.number]).columns
+                data_tensor = torch.tensor(dataset[numeric_cols].values, dtype=torch.float32)
+            else:
+                data_tensor = torch.tensor(dataset, dtype=torch.float32)
+            
+            # Train cascade
+            cascade_result = await self.cascade_trainer.train_cascade(
+                data_tensor,
+                num_tiers=3,
+                models_per_tier=[10, 5, 3]
+            )
+            
+            cascade_time = asyncio.get_event_loop().time() - stage_start
+            num_models = sum(cascade_result['models_per_tier'].values())
+            cascade_trained = True
+            
+            if stream_progress:
+                print(f"🎯 Trained {num_models} models across 3 tiers")
+                print(f"   - Tier 1 (tiny): {cascade_result['models_per_tier']['tier_1']} models")
+                print(f"   - Tier 2 (small): {cascade_result['models_per_tier']['tier_2']} models")
+                print(f"   - Tier 3 (base): {cascade_result['models_per_tier']['tier_3']} models")
+                print(f"⏱️  Completed in {cascade_time:.2f}s")
         
         # ============================================================
         # STAGE 4: COLLAPSE DETECTION
@@ -361,7 +383,8 @@ class SynthosOrchestrator:
         
         stage_start = asyncio.get_event_loop().time()
         
-        # Use reference data if available, otherwise use synthetic predictions
+        # Prepare data for collapse detection
+        # Ensure both tensors have same shape
         if reference_data is not None:
             if isinstance(reference_data, pd.DataFrame):
                 ref_numeric = reference_data.select_dtypes(include=[np.number]).columns
@@ -369,23 +392,36 @@ class SynthosOrchestrator:
             else:
                 reference_tensor = torch.tensor(reference_data, dtype=torch.float32)
         else:
-            # Use cascade predictions as synthetic data
-            reference_tensor = data_tensor
+            # Use same data as both synthetic and original for self-comparison
+            # This will show perfect match (high scores) which is expected
+            reference_tensor = data_tensor.clone()
+        
+        # Ensure same number of samples (take minimum)
+        min_samples = min(data_tensor.shape[0], reference_tensor.shape[0])
+        data_tensor_trimmed = data_tensor[:min_samples]
+        reference_tensor_trimmed = reference_tensor[:min_samples]
+        
+        # Ensure same number of features (take common features)
+        min_features = min(data_tensor.shape[1], reference_tensor.shape[1])
+        data_tensor_trimmed = data_tensor_trimmed[:, :min_features]
+        reference_tensor_trimmed = reference_tensor_trimmed[:, :min_features]
         
         collapse_result = await self.collapse_detector.detect_collapse(
-            synthetic_data=data_tensor,
-            original_data=reference_tensor
+            synthetic_data=data_tensor_trimmed.numpy(),
+            original_data=reference_tensor_trimmed.numpy()
         )
         
         collapse_time = asyncio.get_event_loop().time() - stage_start
         
         if stream_progress:
-            print(f"📈 Collapse Score: {collapse_result['overall_score']:.2f}/100")
-            print(f"   {'❌ COLLAPSE DETECTED!' if collapse_result['collapse_detected'] else '✅ No collapse detected'}")
+            print(f"📈 Collapse Score: {collapse_result.overall_score:.2f}/100")
+            print(f"   {'❌ COLLAPSE DETECTED!' if collapse_result.collapse_detected else '✅ No collapse detected'}")
             print(f"\n   Dimension Breakdown:")
-            for dim, score in collapse_result['dimensions'].items():
-                status = "✅" if score >= 70 else "⚠️" if score >= 50 else "❌"
-                print(f"   {status} {dim}: {score:.2f}")
+            for dim_name, dim_score in collapse_result.dimensions.items():
+                # dim_score is a DimensionScore object
+                score_value = dim_score.score if hasattr(dim_score, 'score') else dim_score
+                status = "✅" if score_value >= 70 else "⚠️" if score_value >= 50 else "❌"
+                print(f"   {status} {dim_name}: {score_value:.2f}")
             print(f"⏱️  Completed in {collapse_time:.2f}s")
         
         # ============================================================
@@ -399,10 +435,10 @@ class SynthosOrchestrator:
         stage_start = asyncio.get_event_loop().time()
         
         # Only localize if we found issues
-        if collapse_result['overall_score'] < self.collapse_threshold:
-            localization_result = await self.gradient_localizer.localize_collapse(
+        if collapse_result.overall_score < self.collapse_threshold:
+            localization_result = await self.collapse_localizer.localize_collapse(
                 dataset=data_tensor,
-                collapse_dimensions=collapse_result['dimensions']
+                collapse_dimensions=collapse_result.dimensions
             )
             
             problematic_rows = localization_result['problematic_indices']
@@ -431,25 +467,32 @@ class SynthosOrchestrator:
         stage_start = asyncio.get_event_loop().time()
         
         recommendation_result = await self.recommendation_engine.generate_recommendations(
-            collapse_score=collapse_result['overall_score'],
-            dimension_scores=collapse_result['dimensions'],
-            diversity_score=diversity_score
+            collapse_score=collapse_result.overall_score,
+            dimension_scores=collapse_result.dimensions,
+            diversity_score=diversity_score,
+            dataset_size=total_rows
         )
         
         recommendation_time = asyncio.get_event_loop().time() - stage_start
         
-        recommendations = recommendation_result['recommendations']
-        projected_improvement = recommendation_result['projected_score'] - collapse_result['overall_score']
+        # Extract data from RecommendationPlan object
+        recommendations = recommendation_result.recommendations if hasattr(recommendation_result, 'recommendations') else []
+        projected_improvement = recommendation_result.projected_improvement if hasattr(recommendation_result, 'projected_improvement') else 0
+        projected_score = recommendation_result.projected_score if hasattr(recommendation_result, 'projected_score') else collapse_result.overall_score
         
         if stream_progress:
             print(f"💡 Generated {len(recommendations)} recommendations")
             if recommendations:
                 print(f"\n   Top 3 Recommendations:")
                 for i, rec in enumerate(recommendations[:3], 1):
-                    print(f"   {i}. {rec['title']}")
-                    print(f"      Impact: +{rec['estimated_impact']:.1f} points | Cost: ${rec['cost_usd']:,.0f}")
+                    # rec might be a Recommendation object or dict
+                    title = rec.title if hasattr(rec, 'title') else rec.get('title', 'Unknown')
+                    impact = rec.estimated_impact if hasattr(rec, 'estimated_impact') else rec.get('estimated_impact', 0)
+                    cost = rec.cost_usd if hasattr(rec, 'cost_usd') else rec.get('cost_usd', 0)
+                    print(f"   {i}. {title}")
+                    print(f"      Impact: +{impact:.1f} points | Cost: ${cost:,.0f}")
             print(f"\n   Projected Improvement: +{projected_improvement:.1f} points")
-            print(f"   Projected Score: {recommendation_result['projected_score']:.1f}/100")
+            print(f"   Projected Score: {projected_score:.1f}/100")
             print(f"⏱️  Completed in {recommendation_time:.2f}s")
         
         # ============================================================
@@ -459,9 +502,9 @@ class SynthosOrchestrator:
         
         # Decide if dataset is approved for training
         approved = self._make_final_decision(
-            collapse_score=collapse_result['overall_score'],
+            collapse_score=collapse_result.overall_score,
             diversity_score=diversity_score,
-            dimension_scores=collapse_result['dimensions']
+            dimension_scores=collapse_result.dimensions
         )
         
         # Get GPU metrics
@@ -479,14 +522,14 @@ class SynthosOrchestrator:
             data_loaded=data_loaded,
             load_time_seconds=load_time,
             diversity_score=diversity_score,
-            diversity_metrics=diversity_result,
+            diversity_metrics={'overall_score': diversity_result.overall_score, 'dimension_scores': diversity_result.dimension_scores},
             diversity_time_seconds=diversity_time,
-            cascade_trained=True,
+            cascade_trained=cascade_trained,
             cascade_models=num_models,
             cascade_time_seconds=cascade_time,
-            collapse_detected=collapse_result['collapse_detected'],
-            collapse_score=collapse_result['overall_score'],
-            dimension_scores=collapse_result['dimensions'],
+            collapse_detected=collapse_result.collapse_detected,
+            collapse_score=collapse_result.overall_score,
+            dimension_scores=collapse_result.dimensions,
             collapse_time_seconds=collapse_time,
             problematic_rows=problematic_rows,
             localization_time_seconds=localization_time,

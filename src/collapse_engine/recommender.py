@@ -76,11 +76,12 @@ class RecommendationEngine:
     async def generate_recommendations(
         self,
         collapse_score: float,
-        dimension_scores: Dict[str, float],
-        localization_results: Optional[Any] = None,
+        dimension_scores: Dict[str, Any],  # Can be DimensionScore objects or floats
+        diversity_score: Optional[float] = None,
         dataset_size: int = 0,
+        localization_results: Optional[Any] = None,
         budget_usd: Optional[float] = None
-    ) -> RecommendationPlan:
+    ) -> Dict[str, Any]:
         """
         Generate prioritized recommendations based on collapse analysis.
         
@@ -99,7 +100,13 @@ class RecommendationEngine:
         recommendations = []
         
         # Generate recommendations for each failed dimension
-        for dim_name, score in dimension_scores.items():
+        for dim_name, dim_score_obj in dimension_scores.items():
+            # Extract score value (handle both DimensionScore objects and floats)
+            if hasattr(dim_score_obj, 'score'):
+                score = dim_score_obj.score
+            else:
+                score = dim_score_obj
+            
             if score < 65:
                 dim_recommendations = self._generate_dimension_recommendations(
                     dim_name, score, dataset_size
