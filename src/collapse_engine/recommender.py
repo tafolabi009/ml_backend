@@ -63,6 +63,22 @@ class RecommendationPlan:
     total_cost_usd: float
     execution_order: List[int]  # Indices in optimal order
     summary: str
+    
+    # Add compatibility properties
+    @property
+    def projected_improvement(self) -> float:
+        """Alias for total_estimated_impact"""
+        return self.total_estimated_impact
+    
+    @property
+    def projected_score(self) -> float:
+        """Estimated score after applying recommendations"""
+        # This would be set by the recommender
+        return getattr(self, '_projected_score', 0.0)
+    
+    @projected_score.setter
+    def projected_score(self, value: float):
+        self._projected_score = value
 
 
 class RecommendationEngine:
@@ -81,19 +97,20 @@ class RecommendationEngine:
         dataset_size: int = 0,
         localization_results: Optional[Any] = None,
         budget_usd: Optional[float] = None
-    ) -> Dict[str, Any]:
+    ) -> RecommendationPlan:
         """
         Generate prioritized recommendations based on collapse analysis.
         
         Args:
             collapse_score: Overall collapse score (0-100)
             dimension_scores: Individual dimension scores
-            localization_results: Results from localizer (optional)
+            diversity_score: Diversity score (optional)
             dataset_size: Number of rows in dataset
+            localization_results: Results from localizer (optional)
             budget_usd: Available budget for fixes (optional)
         
         Returns:
-            Complete recommendation plan
+            Complete recommendation plan (RecommendationPlan object)
         """
         logger.info("Generating recommendations...")
         
@@ -139,7 +156,11 @@ class RecommendationEngine:
         # Generate summary
         summary = self._generate_summary(recommendations, collapse_score, total_impact)
         
-        return RecommendationPlan(
+        # Calculate projected score
+        projected_score = min(100.0, collapse_score + total_impact)
+        
+        # Create plan
+        plan = RecommendationPlan(
             recommendations=recommendations,
             total_estimated_impact=total_impact,
             total_effort_hours=total_effort,
@@ -147,6 +168,11 @@ class RecommendationEngine:
             execution_order=execution_order,
             summary=summary
         )
+        
+        # Set projected score
+        plan.projected_score = projected_score
+        
+        return plan
     
     # ==================== DIMENSION-SPECIFIC RECOMMENDATIONS ====================
     

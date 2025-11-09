@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+package job_orchestrator;
+
+// ============================================================================
+// Job Orchestrator Service
+// ML Backend communicates with the Go Job Orchestrator via gRPC
+// ============================================================================
+
+service JobOrchestrator {
+  // Job lifecycle
+  rpc AcknowledgeJob(JobAck) returns (JobAckResponse);
+  rpc UpdateJobProgress(JobProgress) returns (JobProgressResponse);
+  rpc CompleteJob(JobCompletion) returns (JobCompletionResponse);
+  rpc FailJob(JobFailure) returns (JobFailureResponse);
+  
+  // Heartbeat to indicate worker is alive
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// ============================================================================
+// Job Acknowledgment
+// ============================================================================
+
+message JobAck {
+  string job_id = 1;
+  string worker_id = 2;
+  string validation_id = 3;
+  int64 timestamp = 4;
+}
+
+message JobAckResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Job Progress Updates
+// ============================================================================
+
+message JobProgress {
+  string job_id = 1;
+  string worker_id = 2;
+  string validation_id = 3;
+  
+  // Progress tracking
+  string stage = 4;  // "diversity", "prescreening", "cascade", "detection", "localization", "recommendations"
+  int32 progress_percent = 5;  // 0-100
+  
+  // Current activity
+  string current_activity = 6;  // "Training tier 2 variant 3", "Analyzing dimensions", etc.
+  
+  // Resource usage
+  map<int32, double> gpu_utilization = 7;  // GPU ID -> utilization %
+  double memory_usage_gb = 8;
+  
+  // Estimated completion
+  int64 estimated_completion_timestamp = 9;
+  
+  // Real-time metrics
+  map<string, double> metrics = 10;  // "loss", "accuracy", etc.
+  
+  int64 timestamp = 11;
+}
+
+message JobProgressResponse {
+  bool success = 1;
+  string message = 2;
+  bool should_cancel = 3;  // Orchestrator can request cancellation
+}
+
+// ============================================================================
+// Job Completion
+// ============================================================================
+
+message JobCompletion {
+  string job_id = 1;
+  string worker_id = 2;
+  string validation_id = 3;
+  string dataset_id = 4;
+  
+  // Validation result (API-compliant format)
+  ValidationResult result = 5;
+  
+  // Storage locations
+  string result_storage_path = 6;  // Where full results are stored
+  string model_checkpoint_path = 7;  // Where model checkpoints are stored
+  
+  // Performance metrics
+  int64 processing_time_seconds = 8;
+  double gpu_hours_used = 9;
+  
+  int64 timestamp = 10;
+}
+
+message ValidationResult {
+  string validation_id = 1;
+  string dataset_id = 2;
+  string status = 3;  // "completed"
+  string created_at = 4;
+  string completed_at = 5;
+  
+  // Results section
+  int32 risk_score = 6;
+  string risk_level = 7;
+  double collapse_probability = 8;
+  
+  PredictedPerformance predicted_performance = 9;
+  
+  map<string, int32> dimensions = 10;
+  
+  string recommendation = 11;  // "approved" or "rejected"
+  bool warranty_eligible = 12;
+  
+  repeated Recommendation recommendations_list = 13;
+}
+
+message PredictedPerformance {
+  double accuracy = 1;
+  repeated double confidence_interval = 2;  // [lower, upper]
+  double confidence_level = 3;
+}
+
+message Recommendation {
+  int32 priority = 1;
+  string category = 2;
+  string title = 3;
+  string description = 4;
+  int32 estimated_improvement = 5;
+}
+
+message JobCompletionResponse {
+  bool success = 1;
+  string message = 2;
+  bool result_accepted = 3;
+}
+
+// ============================================================================
+// Job Failure
+// ============================================================================
+
+message JobFailure {
+  string job_id = 1;
+  string worker_id = 2;
+  string validation_id = 3;
+  
+  string error_code = 4;
+  string error_message = 5;
+  string error_stack_trace = 6;
+  
+  bool retryable = 7;
+  
+  // Partial results if any
+  string partial_results_path = 8;
+  
+  int64 timestamp = 9;
+}
+
+message JobFailureResponse {
+  bool success = 1;
+  string message = 2;
+  bool should_retry = 3;
+  int32 retry_after_seconds = 4;
+}
+
+// ============================================================================
+// Heartbeat
+// ============================================================================
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  string current_job_id = 2;  // Empty if idle
+  
+  // Worker status
+  string status = 3;  // "idle", "busy", "error"
+  
+  // Resource availability
+  repeated int32 available_gpus = 4;
+  double available_memory_gb = 5;
+  
+  // Current jobs
+  repeated string active_job_ids = 6;
+  
+  int64 timestamp = 7;
+}
+
+message HeartbeatResponse {
+  bool success = 1;
+  
+  // Commands from orchestrator
+  repeated string jobs_to_cancel = 2;
+  bool should_shutdown = 3;
+  
+  // Config updates
+  int32 heartbeat_interval_seconds = 4;
+}

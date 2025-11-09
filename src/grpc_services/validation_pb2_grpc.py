@@ -3,7 +3,10 @@
 import grpc
 import warnings
 
-import validation_pb2 as validation__pb2
+try:
+    from . import validation_pb2 as validation__pb2
+except ImportError:
+    import validation_pb2 as validation__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__

@@ -1,0 +1,119 @@
+# Storage Configuration for ML Backend
+# Supports multiple storage providers: GCS, S3, Azure Blob, Local filesystem
+
+storage:
+  # Storage provider type: 'gcs', 's3', 'azure', or 'local'
+  provider: local
+  
+  # ========================================================================
+  # Google Cloud Storage (GCS) Configuration
+  # ========================================================================
+  # Uncomment and configure for GCS:
+  # provider: gcs
+  # bucket_name: synthos-validation-data
+  # project_id: your-gcp-project-id
+  # credentials_path: /path/to/service-account-key.json
+  # # Or use GOOGLE_APPLICATION_CREDENTIALS environment variable
+  
+  # ========================================================================
+  # Amazon S3 Configuration
+  # ========================================================================
+  # Uncomment and configure for S3:
+  # provider: s3
+  # bucket_name: synthos-validation-data
+  # region: us-east-1
+  # aws_access_key_id: YOUR_ACCESS_KEY
+  # aws_secret_access_key: YOUR_SECRET_KEY
+  # # Or use AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
+  # # endpoint_url: http://localhost:9000  # For MinIO or S3-compatible storage
+  
+  # ========================================================================
+  # Local Filesystem Configuration (Development/Testing)
+  # ========================================================================
+  # Default configuration for local development
+  base_path: /tmp/ml_backend_storage
+  
+  # For production on-premise:
+  # base_path: /data/synthos/storage
+
+# ========================================================================
+# Storage Paths Structure
+# ========================================================================
+# The following structure is used across all storage providers:
+#
+# datasets/
+#   ├── raw/
+#   │   ├── {dataset_id}/
+#   │   │   └── data.csv
+#   │   └── ...
+#   ├── samples/
+#   │   ├── {validation_id}/
+#   │   │   └── sample.parquet
+#   │   └── ...
+#   └── processed/
+#       └── ...
+#
+# models/
+#   ├── checkpoints/
+#   │   ├── {validation_id}/
+#   │   │   ├── tier1_variant1.pt
+#   │   │   ├── tier1_variant2.pt
+#   │   │   └── ...
+#   │   └── ...
+#   └── signatures/
+#       └── collapse_signatures.json
+#
+# results/
+#   ├── {validation_id}/
+#   │   ├── validation_result.json
+#   │   ├── recommendations.json
+#   │   └── localization_report.json
+#   └── ...
+#
+# scripts/
+#   ├── fixes/
+#   │   ├── {validation_id}/
+#   │   │   └── fix_script.py
+#   │   └── ...
+#   └── ...
+
+# ========================================================================
+# Environment Variables
+# ========================================================================
+# You can also configure storage via environment variables:
+#
+# STORAGE_PROVIDER=gcs|s3|local
+# STORAGE_BUCKET_NAME=your-bucket-name
+# STORAGE_BASE_PATH=/path/for/local/storage
+#
+# For GCS:
+# GCS_PROJECT_ID=your-project-id
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+#
+# For S3:
+# AWS_REGION=us-east-1
+# AWS_ACCESS_KEY_ID=your-key
+# AWS_SECRET_ACCESS_KEY=your-secret
+# S3_ENDPOINT_URL=http://localhost:9000  # Optional, for MinIO etc.
+
+# ========================================================================
+# Production Recommendations
+# ========================================================================
+#
+# Google Cloud (H100/H200 GPUs):
+#   - Use GCS for best performance and integration
+#   - Enable versioning for datasets
+#   - Use lifecycle policies to archive old validations
+#   - Consider Cloud Storage FUSE for direct filesystem access
+#
+# AWS (P4/P5 instances):
+#   - Use S3 with VPC endpoints for better performance
+#   - Enable versioning and lifecycle management
+#   - Use S3 Transfer Acceleration for large uploads
+#   - Consider EFS for shared filesystem access
+#
+# On-premise/Air-gapped:
+#   - Use local filesystem provider
+#   - Ensure high-performance storage (NVMe SSD)
+#   - Setup backup/replication
+#   - Consider MinIO for S3-compatible object storage

@@ -427,7 +427,6 @@ def create_classifier(
     config.pop('context_length', None)
     config.pop('batch_size', None)
     config.pop('params', None)
-    config.pop('holographic_capacity', None)  # Classifier doesn't use holographic memory
     
     if input_dim is not None:
         config['input_dim'] = input_dim
@@ -438,6 +437,7 @@ def create_classifier(
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=num_classes,
+        holographic_capacity=config['holographic_capacity'],
         dropout=config['dropout'],
     )
     

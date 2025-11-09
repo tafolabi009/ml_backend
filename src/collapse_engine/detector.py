@@ -2,6 +2,11 @@
 Collapse Detector - Multi-dimensional model collapse detection
 Optimized for OpenAI/DeepMind scale validation
 
+Architecture-Aware: Designed to work with Resonance Neural Networks
+- Spectral coherence analysis aligns with frequency-domain processing
+- FFT-based metrics match Resonance NN's O(n log n) architecture
+- Holographic memory patterns can be detected in entropy stability
+
 Features:
 - 8-dimensional collapse scoring
 - GPU-accelerated statistical analysis
@@ -229,13 +234,39 @@ class CollapseDetector:
             hist_intersections.append(intersection)
         metrics['histogram_intersection'] = np.mean(hist_intersections) * 100
         
+        # 5. KL divergence (lower is better)
+        kl_divergences = []
+        for i in range(min(synthetic.shape[1], 50)):
+            # Create probability distributions from histograms
+            hist_synth, bins = np.histogram(synthetic[:, i], bins=50, density=True)
+            hist_orig, _ = np.histogram(original[:, i], bins=bins, density=True)
+            
+            # Normalize to probabilities
+            hist_synth = hist_synth / (hist_synth.sum() + 1e-10)
+            hist_orig = hist_orig / (hist_orig.sum() + 1e-10)
+            
+            # Add small epsilon to avoid log(0)
+            hist_synth = hist_synth + 1e-10
+            hist_orig = hist_orig + 1e-10
+            
+            # Calculate KL divergence
+            kl_div = stats.entropy(hist_synth, hist_orig)
+            kl_divergences.append(kl_div)
+        
+        avg_kl = np.mean(kl_divergences)
+        # Convert to similarity score (lower KL = higher score)
+        kl_score = 100 * np.exp(-avg_kl)
+        metrics['kl_divergence'] = avg_kl
+        metrics['kl_similarity'] = kl_score
+        
         # Combined score (weighted average)
         score = (
-            metrics['ks_similarity'] * 0.25 +
-            metrics['wasserstein_similarity'] * 0.25 +
-            metrics['mean_match'] * 0.20 +
+            metrics['ks_similarity'] * 0.20 +
+            metrics['wasserstein_similarity'] * 0.20 +
+            metrics['mean_match'] * 0.15 +
             metrics['std_match'] * 0.15 +
-            metrics['histogram_intersection'] * 0.15
+            metrics['histogram_intersection'] * 0.15 +
+            metrics['kl_similarity'] * 0.15
         )
         
         passed = score >= self.config.distribution_fidelity_threshold
@@ -301,12 +332,17 @@ class CollapseDetector:
         
         # 3. Top correlations preservation
         # Check if top 10% of correlations are preserved
-        k = max(10, len(orig_corr_flat) // 10)
-        top_k_orig = np.argpartition(np.abs(orig_corr_flat), -k)[-k:]
-        top_k_synth = np.argpartition(np.abs(synth_corr_flat), -k)[-k:]
-        
-        overlap = len(set(top_k_orig) & set(top_k_synth)) / k
-        metrics['top_correlations_preserved'] = overlap * 100
+        if len(orig_corr_flat) > 10:
+            k = max(10, len(orig_corr_flat) // 10)
+            k = min(k, len(orig_corr_flat))  # Ensure k doesn't exceed array length
+            top_k_orig = np.argpartition(np.abs(orig_corr_flat), -k)[-k:]
+            top_k_synth = np.argpartition(np.abs(synth_corr_flat), -k)[-k:]
+            
+            overlap = len(set(top_k_orig) & set(top_k_synth)) / k
+            metrics['top_correlations_preserved'] = overlap * 100
+        else:
+            # Too few correlations to meaningfully compare
+            metrics['top_correlations_preserved'] = 100.0
         
         # Combined score
         score = (
@@ -366,8 +402,50 @@ class CollapseDetector:
         metrics['entropy_stability'] = entropy_score
         
         # 2. Mutual information preservation
-        # Simplified: use correlation as proxy
-        mi_score = 85.0  # Placeholder (full MI calculation is expensive)
+        # Calculate MI between feature pairs for both datasets
+        from sklearn.feature_selection import mutual_info_regression
+        
+        mi_scores = []
+        n_features = min(synthetic.shape[1], 20)  # Sample features for efficiency
+        
+        for i in range(n_features):
+            try:
+                # Calculate MI between this feature and the rest
+                if synthetic.shape[1] > 1:
+                    # Sample rows for speed
+                    sample_size = min(5000, synthetic.shape[0])
+                    synth_sample = synthetic[:sample_size, :]
+                    orig_sample = original[:sample_size, :]
+                    
+                    # MI for synthetic data
+                    mi_synth = mutual_info_regression(
+                        synth_sample[:, [i]], 
+                        synth_sample[:, (i+1) % n_features],
+                        random_state=42
+                    )[0]
+                    
+                    # MI for original data
+                    mi_orig = mutual_info_regression(
+                        orig_sample[:, [i]], 
+                        orig_sample[:, (i+1) % n_features],
+                        random_state=42
+                    )[0]
+                    
+                    # Compare MI values (should be similar)
+                    if mi_orig > 1e-6:
+                        mi_ratio = mi_synth / (mi_orig + 1e-10)
+                        mi_scores.append(100 * np.exp(-abs(mi_ratio - 1)))
+                    else:
+                        mi_scores.append(100.0)  # Both near zero is good
+            except Exception as e:
+                logger.warning(f"MI calculation failed for feature {i}: {e}")
+                continue
+        
+        if mi_scores:
+            mi_score = np.mean(mi_scores)
+        else:
+            mi_score = 85.0  # Fallback if all calculations fail
+            
         metrics['mutual_information'] = mi_score
         
         # 3. Effective dimensionality (via PCA)
@@ -518,8 +596,13 @@ class CollapseDetector:
         self, synthetic: np.ndarray, original: np.ndarray
     ) -> DimensionScore:
         """
-        FFT-based spectral analysis (aligned with Resonance NN architecture).
-        Collapse often manifests in frequency domain.
+        FFT-based spectral analysis (perfectly aligned with Resonance NN architecture).
+        
+        This analysis naturally complements Resonance Neural Networks which operate
+        in the frequency domain using FFT. Collapse often manifests as:
+        - Loss of high-frequency components
+        - Abnormal spectral energy concentration
+        - Reduced spectral entropy (mode collapse in frequency space)
         """
         metrics = {}
         

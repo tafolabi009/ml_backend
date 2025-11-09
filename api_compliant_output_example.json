@@ -1,0 +1,122 @@
+{
+  "validation_id": "val_api_test",
+  "dataset_id": "ds_api_test",
+  "status": "completed",
+  "created_at": "1970-01-01T02:40:42.085514",
+  "completed_at": "2025-11-09T10:47:30.588284",
+  "results": {
+    "risk_score": -6,
+    "risk_level": "low",
+    "predicted_performance": {
+      "accuracy": 0.9567587876151185,
+      "confidence_interval": [
+        0.9054070300920947,
+        1.008110545138142
+      ],
+      "confidence_level": 0.95
+    },
+    "collapse_probability": 0.0,
+    "dimensions": {
+      "distribution_fidelity": 229,
+      "correlation_preservation": 100,
+      "diversity_retention": 56,
+      "rare_pattern_handling": 104,
+      "temporal_stability": 96,
+      "semantic_coherence": 99
+    },
+    "recommendation": "approved",
+    "warranty_eligible": true
+  },
+  "internal": {
+    "dataset_path": "test_api_data_large.csv",
+    "dataset_format": "csv",
+    "total_rows": 1000,
+    "total_time_seconds": 0.36583253199933097,
+    "timestamp": "2025-11-09T10:47:30.588285",
+    "stages": {
+      "data_loading": {
+        "loaded": true,
+        "time_seconds": 0.006771398999262601
+      },
+      "diversity_analysis": {
+        "score": 56.24166264562079,
+        "metrics": {
+          "overall_score": 56.24166264562079,
+          "dimension_scores": {
+            "feature0": 65.37382403854131,
+            "feature1": 66.57894005837453,
+            "feature2": 66.32497829815263,
+            "feature3": 64.98514403642794,
+            "feature4": 66.49018439338734,
+            "feature5": 66.5541676762755,
+            "feature6": 65.42715050908708,
+            "feature7": 66.1654397874356,
+            "feature8": 66.61335581804688,
+            "feature9": 66.6325565512983,
+            "feature10": 65.69009349326717,
+            "feature11": 65.59440408177532,
+            "feature12": 66.5047296962681,
+            "feature13": 65.35319618404395,
+            "feature14": 65.89372862096674,
+            "feature15": 66.07654305850512,
+            "feature16": 66.00648837516643,
+            "feature17": 65.84609747094184,
+            "feature18": 64.13270403018379,
+            "feature19": 65.54237999947416,
+            "target": 16.733467201606423
+          }
+        },
+        "time_seconds": 0.020110655999815208
+      },
+      "cascade_training": {
+        "trained": false,
+        "num_models": 0,
+        "time_seconds": 0
+      },
+      "collapse_detection": {
+        "detected": false,
+        "collapse_score": 106.75878761511846,
+        "all_dimensions": {
+          "distribution_fidelity": 229,
+          "correlation_preservation": 100,
+          "entropy_stability": 96,
+          "gradient_health": 60,
+          "loss_landscape": 65,
+          "spectral_coherence": 99,
+          "generalization_gap": 97,
+          "statistical_consistency": 104
+        },
+        "time_seconds": 0.3376517779997812
+      },
+      "localization": {
+        "problematic_rows_count": 0,
+        "row_indices": [],
+        "time_seconds": 2.210999809904024e-06
+      },
+      "recommendations": {
+        "count": 1,
+        "items": [
+          {
+            "title": "Adjust Learning Rate and Optimization",
+            "description": "Tune learning rate, use gradient clipping, or switch optimizer (e.g., Adam -> AdamW with weight decay) to improve gradient health.",
+            "estimated_impact": 18.0,
+            "cost_usd": 150.0,
+            "priority": "2",
+            "category": "FixCategory.HYPERPARAMETER_TUNING"
+          }
+        ],
+        "projected_improvement": 0,
+        "time_seconds": 0.0001451699990866473
+      }
+    },
+    "final_decision": {
+      "approved_for_training": true,
+      "confidence": 81.24166264562079,
+      "reason": "All quality metrics passed thresholds"
+    },
+    "gpu_metrics": {
+      "utilization_avg": 0.0,
+      "memory_used_gb": 0.0
+    }
+  }
+}

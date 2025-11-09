@@ -1,7 +1,7 @@
 """
 Multi-Scale Cascade Trainer
-Uses Resonance NN (FFT-based spectral) + Temporal Eigenstate Networks
-NO ATTENTION MECHANISM - Pure spectral processing
+Uses Resonance Neural Networks (Frequency-Domain with Holographic Memory)
+NO ATTENTION MECHANISM - Pure frequency-domain processing with O(n log n) complexity
 
 Trains 18 models across 3 tiers:
 - Tier 1: 10x tiny models (76M params) - Fast screening
@@ -23,15 +23,15 @@ from pathlib import Path
 import asyncio
 from datetime import datetime
 
-# Import our custom architectures (NO transformers!)
+# Import our custom architectures (Resonance NN from NEURON_NEW)
 from src.model_architectures import (
     create_resonance_model,
-    create_temporal_eigenstate_model,
+    create_long_context_model,
+    create_classifier,
     get_model_info,
-    SpectralLanguageModel,
-    TemporalEigenstateNetwork,
-    HierarchicalTEN,
-    TemporalEigenstateConfig,
+    ResonanceNet,
+    ResonanceLanguageModel,
+    ResonanceClassifier,
     MODEL_CONFIGS
 )
 
@@ -72,7 +72,9 @@ class CascadeProgress:
 
 class CascadeTrainer:
     """
-    Multi-scale cascade trainer using FFT-based spectral models.
+    Multi-scale cascade trainer using Resonance Neural Networks.
+    
+    Uses frequency-domain processing with O(n log n) complexity and holographic memory.
     Trains models in parallel across 4x H200 GPUs.
     """
     
