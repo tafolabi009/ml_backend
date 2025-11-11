@@ -1,0 +1,58 @@
+# Core Dependencies
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Data Processing
+pyarrow>=12.0.0
+h5py>=3.8.0
+tables>=3.8.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+
+# gRPC & Protobuf
+grpcio>=1.50.0
+grpcio-tools>=1.50.0
+protobuf>=4.21.0
+
+# ML & Statistics
+scikit-learn>=1.2.0
+statsmodels>=0.14.0
+
+# GPU Optimization (optional)
+# Use pynvml instead of nvidia-ml-py3 (pynvml is the correct package name)
+pynvml>=11.5.0
+
+# Vector Search (optional but recommended)
+faiss-cpu>=1.7.4  # Use faiss-gpu if you have CUDA 
+
+# Async & Utilities
+aiofiles>=23.0.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Logging
+loguru>=0.7.0
+
+# Testing
+pytest>=7.3.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+pytest-timeout>=2.2.0
+
+# Code Quality
+ruff>=0.1.0
+black>=23.0.0
+mypy>=1.7.0
+
+# Monitoring
+prometheus-client>=0.19.0
+
+# Retries and resilience
+tenacity>=8.2.0
+
+# Custom Architectures (local wheel packages - install separately)
+# Install with: pip install packages/resonance_nn-0.1.0-py3-none-any.whl
+# Install with: pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl

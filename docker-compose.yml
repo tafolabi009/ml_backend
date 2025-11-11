@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: synthos-postgres
+    environment:
+      POSTGRES_DB: synthos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: synthos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Go API Gateway
+  api-gateway:
+    build:
+      context: ./go_backend
+      dockerfile: Dockerfile
+    container_name: synthos-api-gateway
+    environment:
+      ENVIRONMENT: development
+      PORT: 8080
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
+      REDIS_URL: redis:6379
+      JWT_SECRET: dev-secret-change-in-production
+      AWS_REGION: us-east-1
+      S3_BUCKET: synthos-datasets
+      VALIDATION_ENGINE_ADDR: ml-backend:50051
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Python ML Backend (Validation Engine)
+  ml-backend:
+    build:
+      context: ./ml_backend
+      dockerfile: Dockerfile
+    container_name: synthos-ml-backend
+    environment:
+      PYTHONUNBUFFERED: 1
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
+      REDIS_URL: redis:6379
+    ports:
+      - "50051:50051"  # gRPC
+    volumes:
+      - ./ml_backend:/app
+      - ml_models:/app/models
+      - ml_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Uncomment if you have GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  redis_data:
+  ml_models:
+  ml_data:
+
+networks:
+  default:
+    name: synthos-network

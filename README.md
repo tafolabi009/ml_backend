@@ -1,466 +1,429 @@
-# 🚀 Synthos ML Validation Engine
+# Synthos Backend - ML Validation Platform
 
-**World-class collapse detection for OpenAI/DeepMind scale datasets (1B+ rows)**
+**Status:** Alpha / Experimental  
+**Last Updated:** November 11, 2025
 
-[![Status](https://img.shields.io/badge/status-production--ready-green)]()
-[![GPU](https://img.shields.io/badge/GPU-4x%20H100-blue)]()
-[![Scale](https://img.shields.io/badge/scale-1B%2B%20rows-purple)]()
-[![Integration](https://img.shields.io/badge/integration-unified-brightgreen)]()
-[![Cost](https://img.shields.io/badge/cost-%2444.36%2Fhr-orange)]()
+This repository contains the complete backend infrastructure for the Synthos ML validation platform, consisting of:
+- **Go Backend** - API Gateway for customer-facing REST APIs
+- **ML Backend** - Python-based ML validation engine with collapse detection
 
----
-
-## 🎯 Unified Pipeline - All Modules Work as One!
-
-**NEW: All 6 modules now integrated through a single orchestrator!**
-
-```python
-from src import SynthosOrchestrator
-
-# Single entry point - automatic pipeline
-orchestrator = SynthosOrchestrator()
-result = await orchestrator.validate("data.parquet", "parquet")
-
-# Automatic 6-stage validation:
-# ✅ Stage 1: Data Loading
-# ✅ Stage 2: Diversity Analysis  
-# ✅ Stage 3: Cascade Training
-# ✅ Stage 4: Collapse Detection (8 dimensions)
-# ✅ Stage 5: Problem Localization
-# ✅ Stage 6: Recommendations
-
-if result.approved_for_training:
-    print(f"✅ APPROVED! Score: {result.collapse_score:.1f}/100")
-else:
-    print(f"❌ Issues: {result.reason}")
-```
-
-**See [INTEGRATION_COMPLETE.md](INTEGRATION_COMPLETE.md) for details!**
-
----
-
-## 📁 Project Structure
+## Architecture Overview
 
 ```
-ml_backend/
-├── src/                          # Source code
-│   ├── validation_engine/        # Phase 2-4: Diversity & cascade training
-│   ├── collapse_engine/          # Phase 5-6: Detection & localization
-│   ├── data_processors/          # Universal dataset loader
-│   ├── grpc_services/            # gRPC server with mTLS
-│   └── utils/                    # GPU optimization
-│
-├── config/                       # Configuration files
-│   ├── hardware_config.yaml      # 4x H100 setup
-│   └── ml_config.yaml            # Model configurations
-│
-├── proto/                        # Protocol buffer definitions
-│   └── validation.proto          # gRPC service spec
-│
-├── examples/                     # Usage examples
-│   └── complete_pipeline.py      # End-to-end demo
-│
-├── tests/                        # Test suites
-│   ├── unit/                     # Unit tests
-│   ├── integration/              # Integration tests
-│   └── load/                     # Load tests (1B+ rows)
-│
-├── docs/                         # Documentation
-│   ├── README.md                 # Main documentation
-│   ├── ARCHITECTURE.md           # System architecture
-│   ├── IMPLEMENTATION_STATUS.md  # Completion status
-│   ├── QUICK_START.md            # 5-minute guide
-│   └── GCP_H100_DEPLOYMENT.md    # GCP deployment guide
-│
-├── packages/                     # Custom architecture wheels
-│   ├── resonance_nn-*.whl
-│   └── temporal_eigenstate_networks-*.whl
-│
-├── scripts/                      # Helper scripts
-│   ├── generate_certs.sh         # mTLS certificates
-│   └── deployment/               # Deployment automation
-│
-├── deployment/                   # Deployment configs
-│   ├── systemd/                  # Systemd service
-│   ├── docker/                   # Docker setup
-│   └── kubernetes/               # K8s manifests
-│
-├── requirements.txt              # Python dependencies
-└── verify_installation.py        # Installation verifier
+┌─────────────────────────────────────────────────────────────┐
+│                     API GATEWAY (Go)                         │
+│                  - REST API (Customer-facing)                │
+│                  - JWT Authentication                        │
+│                  - Rate limiting                             │
+└─────────────────────────────┬───────────────────────────────┘
+                              │ gRPC
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
+│ Dataset      │    │ Validation       │    │ Collapse     │
+│ Service      │    │ Engine           │    │ Engine       │
+│ (Python)     │    │ (Python)         │    │ (Python)     │
+└──────────────┘    └──────────────────┘    └──────────────┘
+        │                     │                     │
+        └─────────────────────┴─────────────────────┘
+                              │
+                              ▼
+              ┌───────────────────────────────┐
+              │    PostgreSQL + Redis + S3    │
+              └───────────────────────────────┘
 ```
 
----
+## Repository Structure
 
-## ⚡ Quick Start (3 Lines of Code!)
-
-### Option 1: Unified Pipeline (Recommended ⭐)
-
-**All modules work together automatically:**
-
-```python
-from src import SynthosOrchestrator
-
-orchestrator = SynthosOrchestrator()
-result = await orchestrator.validate("data.parquet", "parquet")
-
-if result.approved_for_training:
-    print(f"✅ APPROVED! Score: {result.collapse_score:.1f}/100")
-else:
-    print(f"❌ Issues found. See {len(result.recommendations)} recommendations")
+```
+backend/
+├── go_backend/              # Go API Gateway
+│   ├── cmd/api/             # Main application entry point
+│   ├── internal/            # Internal packages
+│   │   ├── handlers/        # HTTP request handlers
+│   │   ├── middleware/      # HTTP middleware
+│   │   ├── models/          # Data models
+│   │   ├── auth/            # Authentication utilities
+│   │   ├── database/        # Database layer
+│   │   ├── grpc/            # gRPC clients
+│   │   └── storage/         # S3 integration
+│   ├── pkg/                 # Public packages
+│   ├── proto/               # Protocol buffers
+│   └── README.md
+│
+├── ml_backend/              # Python ML validation engine
+│   ├── src/                 # Source code
+│   │   ├── collapse_engine/      # Collapse detection
+│   │   ├── data_processors/      # Data processing
+│   │   ├── grpc_services/        # gRPC servers
+│   │   ├── storage/              # Storage providers
+│   │   ├── utils/                # Utilities
+│   │   └── validation_engine/    # Validation logic
+│   ├── tests/               # Test suite
+│   ├── config/              # Configuration files
+│   ├── docs/                # Documentation
+│   └── README.md
+│
+├── docker-compose.yml       # Full stack deployment
+└── README.md               # This file
 ```
 
-**That's it!** The orchestrator automatically:
-1. ✅ Loads your data
-2. ✅ Analyzes diversity  
-3. ✅ Trains cascade models
-4. ✅ Detects collapse across 8 dimensions
-5. ✅ Localizes problematic rows
-6. ✅ Generates prioritized recommendations
-7. ✅ Makes approval decision
+## Quick Start
 
-**See [UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) for complete guide.**
+### Prerequisites
 
----
+- Docker & Docker Compose
+- Go 1.21+ (for local development)
+- Python 3.11+ (for local development)
+- PostgreSQL 15+
+- Redis 7+
 
-### Option 2: Manual Setup (Advanced)
+### Running with Docker Compose
 
-If you want to use modules individually:
-
-**1. Install Dependencies**
 ```bash
+# Clone the repository
+git clone https://github.com/tafolabi009/backend.git
+cd backend
+
+# Start all services
+docker-compose up -d
+
+# Check service health
+docker-compose ps
+
+# View logs
+docker-compose logs -f api-gateway
+docker-compose logs -f ml-backend
+
+# Stop all services
+docker-compose down
+```
+
+The API Gateway will be available at `http://localhost:8080`.
+
+### Running Locally (Development)
+
+#### Go API Gateway
+
+```bash
+cd go_backend
+
+# Install dependencies
+go mod download
+
+# Copy environment file
+cp .env.example .env
+
+# Run the server
+go run cmd/api/main.go
+```
+
+#### Python ML Backend
+
+```bash
+cd ml_backend
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
-pip install packages/resonance_nn-0.1.0-py3-none-any.whl
-pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl
+
+# Run tests
+./run_tests.sh
+
+# Run the gRPC server
+python src/grpc_services/validation_server.py
 ```
 
-**2. Generate Certificates**
-```bash
-bash scripts/generate_certs.sh
+## API Documentation
+
+### Base URL
+```
+https://api.synthos.ai/v1
 ```
 
-**3. Run Example**
-```bash
-python examples/unified_pipeline_simple.py
+### Authentication
+All protected endpoints require a JWT token in the Authorization header:
+```
+Authorization: Bearer <access_token>
 ```
 
-**Expected Output:**
-```
-✅ APPROVED FOR TRAINING
-   • Quality Score: 72.4/100
-   • Diversity Score: 68.2/100
-   • Confidence: 87.3%
+### Key Endpoints
 
-🚀 You can now proceed with model training!
-```
+#### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - User login
+- `POST /auth/refresh` - Refresh access token
 
----
+#### Datasets
+- `POST /datasets/upload` - Initiate dataset upload
+- `GET /datasets` - List all datasets
+- `GET /datasets/:id` - Get dataset details
+- `DELETE /datasets/:id` - Delete dataset
 
-## 🎯 Features
+#### Validations
+- `POST /validations/create` - Create validation job
+- `GET /validations/:id` - Get validation results
+- `GET /validations/:id/collapse-details` - Get collapse analysis
+- `GET /validations/:id/recommendations` - Get fix recommendations
 
-### ✅ Core Capabilities
+For complete API documentation, see [docs/synthos-api-architecture.md](ml_backend/docs/synthos-api-architecture.md).
 
-- **8-Dimensional Collapse Detection** - Most comprehensive in industry
-- **FFT-Based Spectral Analysis** - Aligned with Resonance NN architecture
-- **Gradient-Based Localization** - Pinpoint exact problematic rows
-- **Intelligent Recommendations** - Prioritized fixes with cost-benefit analysis
-- **Extreme Scale** - Optimized for 1B+ row datasets
-- **GPU Optimization** - Mixed precision, >80% utilization target
-- **Production-Grade** - gRPC with mTLS, streaming, error handling
+## Development Workflow
 
-### 📊 Dataset Support
-
-CSV • JSON • Parquet • HDF5 • Arrow • Feather • Excel • TSV
-
----
-
-## 💰 Hardware Configuration
-
-### Current Setup (GCP a3-highgpu-4g)
-
-| Component | Specification | Cost |
-|-----------|--------------|------|
-| **GPUs** | 4x NVIDIA H100 (80GB) | $28,605.93/mo |
-| **Compute** | 104 vCPU + 936GB RAM | $3,452.92/mo |
-| **Storage** | 500GB Hyperdisk + 3TB NVMe SSD | $325/mo |
-| **TOTAL** | | **$32,383.85/mo** |
-
-**Hourly Cost**: $44.36  
-**Location**: us-central1-b  
-**OS**: Rocky Linux 8 with NVIDIA Driver 580
-
----
-
-## 📈 Performance Estimates
-
-| Dataset Size | Time | Cost | GPU Util |
-|--------------|------|------|----------|
-| 10K rows | <1 min | $0.74 | 45% |
-| 1M rows | 5 min | $3.70 | 75% |
-| 100M rows | 45 min | $33.27 | 85% |
-| **1B rows** | **6 hours** | **$266.16** | **90%** |
-
-*Based on 4x H100 at $44.36/hour*
-
----
-
-## 🚀 Deployment
-
-### GCP Deployment
-
-See [docs/GCP_H100_DEPLOYMENT.md](docs/GCP_H100_DEPLOYMENT.md) for complete guide.
-
-**Quick deploy:**
-```bash
-gcloud compute instances create synthos-ml-validator \
-    --zone=us-central1-b \
-    --machine-type=a3-highgpu-4g \
-    --accelerator=type=nvidia-h100-80gb,count=4 \
-    --image=rocky-linux-8-nvidia-580 \
-    --boot-disk-size=500GB \
-    --local-ssd=interface=nvme,count=8
-```
-
-### Systemd Service
+### Making Changes to Go Backend
 
 ```bash
-sudo cp deployment/systemd/synthos-validator.service /etc/systemd/system/
-sudo systemctl enable synthos-validator
-sudo systemctl start synthos-validator
+cd go_backend
+
+# Create a new handler
+touch internal/handlers/new_feature.go
+
+# Format code
+go fmt ./...
+
+# Run tests
+go test ./...
+
+# Build
+go build -o api cmd/api/main.go
 ```
 
----
-
-## 📚 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) | **⭐ START HERE** - Complete guide for unified pipeline |
-| [README.md](docs/README.md) | Complete developer guide & API reference |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design & technical details |
-| [QUICK_START.md](docs/QUICK_START.md) | 5-minute getting started |
-| [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | What's complete & roadmap |
-| [GCP_H100_DEPLOYMENT.md](docs/GCP_H100_DEPLOYMENT.md) | GCP deployment guide |
-
----
-
-## 🧪 Testing
+### Making Changes to ML Backend
 
 ```bash
-# Unit tests
-pytest tests/unit/ -v --cov=src
+cd ml_backend
 
-# Integration tests
+# Add new functionality
+touch src/new_module/feature.py
+
+# Format code
+ruff format .
+
+# Run tests
+pytest tests/ -v --cov=src
+
+# Run linting
+ruff check .
+mypy src/
+```
+
+## Testing
+
+### Go Backend Tests
+```bash
+cd go_backend
+go test ./... -v -cover
+```
+
+### Python ML Backend Tests
+```bash
+cd ml_backend
+./run_tests.sh  # Runs all tests with coverage
+```
+
+### Integration Tests
+```bash
+# Start all services
+docker-compose up -d
+
+# Run integration tests
+cd ml_backend
 pytest tests/integration/ -v
-
-# Load test (1B rows)
-python tests/load/test_billion_rows.py
 ```
 
----
+## Production Deployment
 
-## 🔧 Configuration
+### Environment Variables
 
-### Hardware (config/hardware_config.yaml)
+#### Go API Gateway
+- `ENVIRONMENT` - production
+- `PORT` - 8080
+- `DATABASE_URL` - PostgreSQL connection string
+- `REDIS_URL` - Redis connection string
+- `JWT_SECRET` - **REQUIRED** - Strong random string
+- `AWS_REGION` - AWS region
+- `S3_BUCKET` - S3 bucket name
+- `VALIDATION_ENGINE_ADDR` - gRPC address
 
-```yaml
-gpus:
-  total: 4
-  model: "H100"
-  memory_per_gpu_gb: 80
+#### ML Backend
+- `DATABASE_URL` - PostgreSQL connection string
+- `REDIS_URL` - Redis connection string
+- `AWS_ACCESS_KEY_ID` - AWS credentials
+- `AWS_SECRET_ACCESS_KEY` - AWS credentials
+- `S3_BUCKET` - S3 bucket name
 
-instance:
-  type: "a3-highgpu-4g"
-  region: "us-central1-b"
-  cost_per_hour_usd: 44.36
-```
+### Building for Production
 
-### ML Models (config/ml_config.yaml)
-
-```yaml
-cascade:
-  tiers:
-    tier_1: { size: "tiny", models: 10, params: "76M" }
-    tier_2: { size: "small", models: 5, params: "454M" }
-    tier_3: { size: "base", models: 3, params: "983M" }
-```
-
----
-
-## 🎓 Usage Examples
-
-### 🌟 Unified Pipeline (Simple - Recommended)
-
-```python
-import asyncio
-from src import SynthosOrchestrator
-
-async def main():
-    # Initialize (links all modules together)
-    orchestrator = SynthosOrchestrator(
-        collapse_threshold=65.0,
-        diversity_threshold=50.0
-    )
-    
-    # Validate (automatic 6-stage pipeline)
-    result = await orchestrator.validate(
-        dataset_path="data.parquet",
-        dataset_format="parquet",
-        output_report_path="report.json",
-        stream_progress=True  # Real-time progress
-    )
-    
-    # Check result
-    if result.approved_for_training:
-        print(f"✅ APPROVED - Score: {result.collapse_score:.1f}/100")
-    else:
-        print(f"❌ REJECTED - {result.reason}")
-        for rec in result.recommendations[:3]:
-            print(f"  💡 {rec['title']}: +{rec['estimated_impact']:.1f} pts")
-
-asyncio.run(main())
-```
-
-**See [docs/UNIFIED_PIPELINE.md](docs/UNIFIED_PIPELINE.md) for complete guide.**
-
----
-
-### 📦 Individual Modules (Advanced)
-
-If you need fine-grained control:
-
-#### Basic Validation
-
-```python
-from src.validation_engine import DiversityAnalyzer
-from src.collapse_engine import CollapseDetector
-
-# Analyze diversity
-analyzer = DiversityAnalyzer()
-diversity = await analyzer.analyze_diversity("data.parquet", "parquet")
-
-# Detect collapse
-detector = CollapseDetector()
-result = await detector.detect_collapse(synthetic_data, original_data)
-
-if result.collapse_detected:
-    print("❌ DO NOT TRAIN - Collapse detected!")
-else:
-    print("✅ APPROVED - Quality is excellent")
-```
-
-### With Recommendations
-
-```python
-from src.collapse_engine import RecommendationEngine
-
-recommender = RecommendationEngine()
-plan = await recommender.generate_recommendations(
-    collapse_score=result.overall_score,
-    dimension_scores=result.dimensions
-)
-
-print(f"Top Recommendations:")
-for rec in plan.recommendations[:3]:
-    print(f"  - {rec.title}: +{rec.estimated_impact} points, ${rec.cost_usd}")
-```
-
----
-
-## 🏆 Key Innovations
-
-1. **FFT-Based Collapse Detection** - First to align with model architecture
-2. **8-Dimensional Scoring** - Most comprehensive (vs industry standard 2-3)
-3. **Gradient Localization** - Pinpoint exact problematic rows
-4. **Smart Recommendations** - Not just "what's wrong" but "how to fix it"
-5. **Extreme Scale** - Built for 1B+ rows from day one
-
----
-
-## 📊 Component Status
-
-| Component | LOC | Status |
-|-----------|-----|--------|
-| Diversity Analyzer | ~700 | ✅ Complete |
-| Cascade Trainer | ~600 | ✅ Complete |
-| Collapse Detector | ~800 | ✅ Complete |
-| Signature Library | ~400 | ✅ Complete |
-| Localizer | ~450 | ✅ Complete |
-| Recommender | ~550 | ✅ Complete |
-| GPU Optimizer | ~450 | ✅ Complete |
-| gRPC Services | ~400 | ✅ Complete |
-| Dataset Loader | ~500 | ✅ Complete |
-| **TOTAL** | **~6,200** | **100% Complete** |
-
----
-
-## 💡 Cost Optimization Tips
-
-1. **Use Spot/Preemptible Instances** - 70% discount (risk: can be terminated)
-2. **Committed Use Discounts** - 37-55% discount (1-3 year commitment)
-3. **Right-size GPUs** - Use 2x H100 if workload fits in 160GB (50% savings)
-4. **Auto-shutdown** - Stop instance during idle periods
-5. **Regional Selection** - Some regions are cheaper
-
-**Potential Savings**: $10K-15K/month with optimization
-
----
-
-## 🆘 Support & Troubleshooting
-
-### Common Issues
-
-**Out of Memory:**
 ```bash
-# Reduce batch size in config/hardware_config.yaml
-batch_size: 32  # Was 64
+# Build Go API Gateway
+cd go_backend
+CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api cmd/api/main.go
+
+# Build Docker images
+docker build -t synthos-api-gateway:latest go_backend/
+docker build -t synthos-ml-backend:latest ml_backend/
+
+# Push to registry
+docker tag synthos-api-gateway:latest your-registry/synthos-api-gateway:latest
+docker push your-registry/synthos-api-gateway:latest
 ```
 
-**Low GPU Utilization:**
+### Kubernetes Deployment
+
 ```bash
-# Increase DataLoader workers
-num_workers: 32  # Was 16
+# Apply Kubernetes manifests
+kubectl apply -f ml_backend/deployment/kubernetes/
+
+# Check deployment status
+kubectl get pods -n synthos
+kubectl get services -n synthos
 ```
 
-**Connection Issues:**
-```bash
-# Check firewall rules
-gcloud compute firewall-rules list | grep ml-validator
+## Monitoring & Observability
+
+### Metrics
+- Prometheus metrics exposed at `/metrics`
+- Grafana dashboards available in `ml_backend/deployment/monitoring/`
+
+### Logging
+- Structured JSON logs
+- Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- Centralized logging with ELK stack (optional)
+
+### Health Checks
+- API Gateway: `GET /health`
+- ML Backend: `GET /health` (gRPC health check)
+
+## Security
+
+### Best Practices
+- ✅ JWT tokens with short expiration (15 minutes)
+- ✅ HTTPS/TLS for all communications
+- ✅ Password hashing with bcrypt
+- ✅ Input validation on all endpoints
+- ✅ CORS configuration
+- 🚧 Rate limiting (in progress)
+- 🚧 API key management (in progress)
+- 🚧 Secrets management with Vault (planned)
+
+### Known Security Issues
+- JWT secret must be changed in production
+- Database passwords should use secrets management
+- S3 bucket policies need review
+
+## Contributing
+
+### Branching Strategy
+- `main` - Production-ready code
+- `develop` - Development branch
+- `feature/*` - Feature branches
+- `bugfix/*` - Bug fix branches
+
+### Commit Messages
+Follow conventional commits:
+```
+feat: Add warranty request endpoint
+fix: Resolve JWT token expiration issue
+docs: Update API documentation
+test: Add unit tests for collapse detector
 ```
 
-### Getting Help
+### Pull Request Process
+1. Create feature branch from `develop`
+2. Write tests for new functionality
+3. Ensure all tests pass
+4. Update documentation
+5. Submit PR with detailed description
+6. Wait for code review
 
-- 📖 Check [docs/](docs/) directory
-- 🐛 Review `server.log` for errors
-- 📊 Monitor with `nvidia-smi`
-- 📞 Contact: ML Team
+## Known Issues & Limitations
+
+### Current State: Alpha/Experimental
+
+⚠️ **This system is NOT production-ready**
+
+#### Critical Issues
+- ❌ Database layer not implemented (using mock data)
+- ❌ gRPC clients not connected to ML backend
+- ❌ S3 integration incomplete
+- ❌ Warranty system not implemented
+- ❌ Report generation (PDF) not implemented
+- ❌ WebSocket support for real-time updates missing
+- ❌ Rate limiting not implemented
+- ❌ Comprehensive test coverage needed (currently ~30%)
+
+#### What Works
+- ✅ REST API structure and routing
+- ✅ JWT authentication and middleware
+- ✅ Basic CRUD operations (mock data)
+- ✅ Docker containerization
+- ✅ ML validation engine (see ml_backend/PRODUCTION_IMPROVEMENTS.md)
+
+## Roadmap
+
+### Phase 1: Core Infrastructure (Current)
+- [x] Go API Gateway skeleton
+- [x] REST API endpoints (handlers)
+- [x] JWT authentication
+- [x] Docker Compose setup
+- [ ] Database integration
+- [ ] gRPC client implementation
+- [ ] S3 integration
+
+### Phase 2: ML Integration (1-2 months)
+- [ ] Connect Go backend to Python validation engine
+- [ ] Real-time progress updates via WebSocket
+- [ ] Async job processing with RabbitMQ
+- [ ] Result caching with Redis
+
+### Phase 3: Production Features (2-3 months)
+- [ ] Rate limiting and API quotas
+- [ ] Warranty management system
+- [ ] Report generation (PDF)
+- [ ] Comprehensive monitoring
+- [ ] 70%+ test coverage
+- [ ] Security audit and hardening
+
+### Phase 4: Scale & Polish (3-6 months)
+- [ ] Kubernetes production deployment
+- [ ] Load testing and optimization
+- [ ] Horizontal scaling
+- [ ] Advanced analytics
+- [ ] Customer dashboard
+
+## Performance
+
+### Current Performance (Alpha)
+- API latency: ~50-100ms (no database)
+- Throughput: TBD (not benchmarked)
+- ML validation: See ml_backend/TESTING_GUIDE.md
+
+### Target Performance (Production)
+- API latency: <500ms (p95)
+- Throughput: 1000+ requests/second
+- ML validation: 1B rows in <24 hours
+
+## License
+
+MIT License - See LICENSE file for details
+
+## Support & Contact
+
+- **Issues:** https://github.com/tafolabi009/backend/issues
+- **Documentation:** [ml_backend/docs/](ml_backend/docs/)
+- **Email:** support@synthos.ai (not yet active)
 
 ---
 
-## 🔐 Security
+**Remember:** This is an **Alpha/Experimental** system. Do not use in production without:
+1. Implementing database layer
+2. Completing security hardening
+3. Achieving 70%+ test coverage
+4. Running comprehensive load tests
+5. Security audit
 
-- ✅ mTLS authentication (service-to-service)
-- ✅ Certificate generation included
-- ✅ Firewall rules configured
-- ✅ Encrypted communication
-- ✅ No public endpoints
-
----
-
-## 📝 License
-
-Internal use only - Synthos Platform
-
----
-
-## 🎉 Credits
-
-**Built by**: ML Engineering Team  
-**Date**: October 31, 2025  
-**Version**: 1.0.0  
-**Status**: Production Ready
-
----
-
-**Ready to validate at OpenAI/DeepMind scale!** 🚀
-
-*"The best validation engine is the one that catches collapse before you waste $100K on training."*
+See [ml_backend/PRODUCTION_IMPROVEMENTS.md](ml_backend/PRODUCTION_IMPROVEMENTS.md) for recent improvements and [ml_backend/TESTING_GUIDE.md](ml_backend/TESTING_GUIDE.md) for testing instructions.
