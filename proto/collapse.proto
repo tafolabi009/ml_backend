@@ -1,0 +1,256 @@
+syntax = "proto3";
+
+package collapse;
+
+option go_package = "github.com/tafolabi009/backend/proto/collapse";
+
+// Collapse Service - Handles collapse detection, localization, and recommendations
+service CollapseService {
+  // Detect mode collapse in dataset
+  rpc DetectCollapse(DetectCollapseRequest) returns (DetectCollapseResponse);
+  
+  // Localize collapse points in dataset
+  rpc LocalizeCollapse(LocalizeCollapseRequest) returns (LocalizeCollapseResponse);
+  
+  // Generate fix recommendations
+  rpc GenerateRecommendations(RecommendationsRequest) returns (RecommendationsResponse);
+  
+  // Generate advanced recommendations
+  rpc GenerateAdvancedRecommendations(AdvancedRecommendationsRequest) returns (AdvancedRecommendationsResponse);
+  
+  // Check signature library for known patterns
+  rpc CheckSignatureLibrary(SignatureCheckRequest) returns (SignatureCheckResponse);
+}
+
+// Collapse Detection
+message DetectCollapseRequest {
+  string job_id = 1;
+  string dataset_path = 2;
+  string data_format = 3;
+  CollapseConfig config = 4;
+  repeated string target_columns = 5;
+}
+
+message CollapseConfig {
+  int32 chunk_size = 1;
+  bool use_gpu = 2;
+  int32 num_gpus = 3;
+  map<string, float> dimension_thresholds = 4;  // e.g., {"distribution_fidelity": 0.7}
+  bool enable_advanced_analysis = 5;
+  float confidence_threshold = 6;
+}
+
+message DetectCollapseResponse {
+  string job_id = 1;
+  CollapseScore score = 2;
+  map<string, DimensionScore> dimensions = 3;
+  repeated string warnings = 4;
+  string error_message = 5;
+}
+
+message CollapseScore {
+  float overall_score = 1;
+  float confidence = 2;
+  string severity = 3;  // none, low, medium, high, critical
+  bool collapse_detected = 4;
+  string collapse_type = 5;
+  repeated string affected_dimensions = 6;
+  ScalePrediction scale_prediction = 7;
+}
+
+message DimensionScore {
+  string name = 1;
+  float score = 2;
+  float threshold = 3;
+  bool passed = 4;
+  string severity = 5;
+  repeated string issues = 6;
+  float confidence = 7;
+}
+
+message ScalePrediction {
+  float score_at_1m = 1;
+  float score_at_10m = 2;
+  float score_at_100m = 3;
+  float score_at_1b = 4;
+  string recommendation = 5;
+}
+
+// Collapse Localization
+message LocalizeCollapseRequest {
+  string job_id = 1;
+  string dataset_path = 2;
+  string data_format = 3;
+  CollapseScore collapse_score = 4;
+  LocalizationConfig config = 5;
+}
+
+message LocalizationConfig {
+  int32 chunk_size = 1;
+  int32 top_k_regions = 2;
+  bool use_gpu = 3;
+  repeated string focus_dimensions = 4;
+}
+
+message LocalizeCollapseResponse {
+  string job_id = 1;
+  repeated LocalizationResult regions = 2;
+  map<string, string> metadata = 3;
+  string error_message = 4;
+}
+
+message LocalizationResult {
+  string region_id = 1;
+  int64 start_row = 2;
+  int64 end_row = 3;
+  repeated string affected_columns = 4;
+  string issue_type = 5;  // duplicate_entities, high_outlier_density, correlation_drop, etc.
+  float severity_score = 6;
+  float confidence = 7;
+  map<string, float> dimension_impacts = 8;
+  string description = 9;
+}
+
+// Recommendations
+message RecommendationsRequest {
+  string job_id = 1;
+  CollapseScore collapse_score = 2;
+  repeated LocalizationResult localization_results = 3;
+  string dataset_path = 4;
+  RecommendationConfig config = 5;
+}
+
+message RecommendationConfig {
+  int32 max_recommendations = 1;
+  bool include_impact_estimates = 2;
+  bool include_implementation_code = 3;
+  repeated string focus_categories = 4;  // data_removal, augmentation, resampling, etc.
+}
+
+message RecommendationsResponse {
+  string job_id = 1;
+  repeated Recommendation recommendations = 2;
+  CombinedImpact combined_impact = 3;
+  string error_message = 4;
+}
+
+message Recommendation {
+  int32 priority = 1;
+  string category = 2;
+  string title = 3;
+  string description = 4;
+  Impact impact = 5;
+  Implementation implementation = 6;
+  float confidence = 7;
+}
+
+message Impact {
+  float current_risk_score = 1;
+  float expected_risk_score = 2;
+  float improvement = 3;
+  map<string, float> dimension_improvements = 4;
+}
+
+message Implementation {
+  string method = 1;
+  int64 affected_rows = 2;
+  repeated string affected_columns = 3;
+  string estimated_time = 4;
+  repeated string steps = 5;
+  string code_snippet = 6;
+}
+
+message CombinedImpact {
+  float current_risk_score = 1;
+  float expected_risk_score = 2;
+  float total_improvement = 3;
+  string estimated_time = 4;
+  repeated string prerequisites = 5;
+}
+
+// Advanced Recommendations
+message AdvancedRecommendationsRequest {
+  string job_id = 1;
+  CollapseScore collapse_score = 2;
+  repeated LocalizationResult localization_results = 3;
+  string dataset_path = 4;
+  AdvancedRecommendationConfig config = 5;
+}
+
+message AdvancedRecommendationConfig {
+  int32 max_recommendations = 1;
+  bool enable_ml_suggestions = 2;
+  bool enable_cost_analysis = 3;
+  repeated string priority_dimensions = 4;
+  map<string, float> business_constraints = 5;
+}
+
+message AdvancedRecommendationsResponse {
+  string job_id = 1;
+  repeated AdvancedRecommendation recommendations = 2;
+  OptimizationPlan optimization_plan = 3;
+  CostBenefitAnalysis cost_benefit = 4;
+  string error_message = 5;
+}
+
+message AdvancedRecommendation {
+  string id = 1;
+  int32 priority = 2;
+  string category = 3;
+  string confidence_level = 4;
+  string title = 5;
+  string description = 6;
+  Impact impact = 7;
+  Implementation implementation = 8;
+  repeated string dependencies = 9;
+  RiskAssessment risk = 10;
+}
+
+message OptimizationPlan {
+  repeated string execution_order = 1;
+  map<string, string> parallel_groups = 2;
+  string total_estimated_time = 3;
+  repeated string checkpoints = 4;
+}
+
+message CostBenefitAnalysis {
+  float implementation_cost = 1;
+  float expected_benefit = 2;
+  float roi = 3;
+  string break_even_point = 4;
+}
+
+message RiskAssessment {
+  string risk_level = 1;
+  repeated string potential_issues = 2;
+  repeated string mitigation_strategies = 3;
+}
+
+// Signature Library
+message SignatureCheckRequest {
+  string dataset_path = 1;
+  CollapseScore collapse_score = 2;
+  repeated LocalizationResult localization_results = 3;
+}
+
+message SignatureCheckResponse {
+  repeated KnownPattern matched_patterns = 1;
+  repeated QuickFix quick_fixes = 2;
+  float confidence = 3;
+}
+
+message KnownPattern {
+  string pattern_id = 1;
+  string name = 2;
+  string description = 3;
+  float match_confidence = 4;
+  repeated string affected_dimensions = 5;
+}
+
+message QuickFix {
+  string fix_id = 1;
+  string pattern_id = 2;
+  string description = 3;
+  string code_snippet = 4;
+  float success_rate = 5;
+}

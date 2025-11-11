@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package validation;
+
+option go_package = "github.com/tafolabi009/backend/proto/validation";
+
+// Validation Service - Handles cascade training and diversity analysis
+service ValidationService {
+  // Train cascade of models for validation
+  rpc TrainCascade(TrainCascadeRequest) returns (TrainCascadeResponse);
+  
+  // Analyze dataset diversity
+  rpc AnalyzeDiversity(AnalyzeDiversityRequest) returns (AnalyzeDiversityResponse);
+  
+  // Get training progress
+  rpc GetTrainingProgress(ProgressRequest) returns (ProgressResponse);
+  
+  // Cancel training job
+  rpc CancelTraining(CancelRequest) returns (CancelResponse);
+}
+
+// Train Cascade Request
+message TrainCascadeRequest {
+  string job_id = 1;
+  string dataset_path = 2;
+  string data_format = 3;  // csv, parquet, hdf5, json, excel
+  CascadeConfig config = 4;
+  map<string, string> metadata = 5;
+}
+
+message CascadeConfig {
+  int32 num_epochs = 1;
+  int32 batch_size = 2;
+  float learning_rate = 3;
+  int32 early_stopping_patience = 4;
+  float validation_split = 5;
+  bool use_multi_gpu = 6;
+  int32 num_gpus = 7;
+  repeated string tiers = 8;  // ["light", "medium", "heavy"]
+  bool enable_spectral_analysis = 9;
+  bool enable_frequency_analysis = 10;
+}
+
+message TrainCascadeResponse {
+  string job_id = 1;
+  string status = 2;  // queued, running, completed, failed
+  repeated ModelResult results = 3;
+  CascadeMetrics metrics = 4;
+  string error_message = 5;
+}
+
+message ModelResult {
+  string tier = 1;
+  string model_name = 2;
+  float training_time = 3;
+  float validation_accuracy = 4;
+  float validation_loss = 5;
+  int32 total_epochs = 6;
+  int32 best_epoch = 7;
+  map<string, float> additional_metrics = 8;
+}
+
+message CascadeMetrics {
+  float total_training_time = 1;
+  float average_accuracy = 2;
+  float best_accuracy = 3;
+  string best_model = 4;
+  float ensemble_accuracy = 5;
+  float spectral_entropy = 6;
+  float frequency_concentration = 7;
+}
+
+// Diversity Analysis Request
+message AnalyzeDiversityRequest {
+  string job_id = 1;
+  string dataset_path = 2;
+  string data_format = 3;
+  DiversityConfig config = 4;
+  repeated string stratification_columns = 5;
+}
+
+message DiversityConfig {
+  int32 target_sample_size = 1;
+  float confidence_level = 2;
+  int32 chunk_size = 3;
+  bool enable_auto_stratification = 4;
+  int32 max_strata = 5;
+  repeated string dimensions_to_analyze = 6;
+}
+
+message AnalyzeDiversityResponse {
+  string job_id = 1;
+  string status = 2;
+  DiversityScore score = 3;
+  map<string, DimensionScore> dimension_scores = 4;
+  SampleQuality quality = 5;
+  repeated string warnings = 6;
+  string error_message = 7;
+}
+
+message DiversityScore {
+  float overall_score = 1;
+  float spread_score = 2;
+  float uniqueness_score = 3;
+  float balance_score = 4;
+  float completeness_score = 5;
+  string status = 6;  // excellent, good, acceptable, poor
+}
+
+message DimensionScore {
+  string dimension = 1;
+  float score = 2;
+  float weight = 3;
+  string assessment = 4;
+}
+
+message SampleQuality {
+  float quality_score = 1;
+  int64 total_rows = 2;
+  int64 valid_rows = 3;
+  float completeness = 4;
+  float outlier_percentage = 5;
+}
+
+// Progress tracking
+message ProgressRequest {
+  string job_id = 1;
+}
+
+message ProgressResponse {
+  string job_id = 1;
+  string status = 2;
+  float progress_percentage = 3;
+  string current_stage = 4;
+  int64 elapsed_time = 5;
+  int64 estimated_remaining = 6;
+  map<string, string> stage_details = 7;
+}
+
+// Cancel request
+message CancelRequest {
+  string job_id = 1;
+  string reason = 2;
+}
+
+message CancelResponse {
+  string job_id = 1;
+  bool success = 2;
+  string message = 3;
+}

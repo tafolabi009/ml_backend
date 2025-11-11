@@ -1,0 +1,46 @@
+# Prometheus configuration for Synthos microservices
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # API Gateway metrics
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8080']
+    metrics_path: /metrics
+
+  # Job Orchestrator metrics
+  - job_name: 'job-orchestrator'
+    static_configs:
+      - targets: ['job-orchestrator:50052']
+    metrics_path: /metrics
+
+  # Data Service metrics
+  - job_name: 'data-service'
+    static_configs:
+      - targets: ['data-service:50054']
+    metrics_path: /metrics
+
+  # Validation Engine metrics
+  - job_name: 'validation-engine'
+    static_configs:
+      - targets: ['validation-engine:50051']
+    metrics_path: /metrics
+
+  # Collapse Engine metrics
+  - job_name: 'collapse-engine'
+    static_configs:
+      - targets: ['collapse-engine:50053']
+    metrics_path: /metrics
+
+  # PostgreSQL metrics
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']

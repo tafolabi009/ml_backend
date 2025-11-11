@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tafolabi009/backend/go_backend/internal/auth"
 	"github.com/tafolabi009/backend/go_backend/internal/handlers"
 	"github.com/tafolabi009/backend/go_backend/internal/middleware"
 	"github.com/tafolabi009/backend/go_backend/pkg/config"
+	"github.com/tafolabi009/backend/go_backend/pkg/database"
+	"github.com/tafolabi009/backend/go_backend/pkg/grpcclient"
 )
 
 func main() {
@@ -22,6 +25,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Initialize JWT
+	auth.InitJWT(cfg.JWTSecret)
+
+	// Initialize database
+	if err := database.Init(cfg.DatabaseURL); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer database.Close()
+
+	// Initialize gRPC clients
+	grpcClients, err := grpcclient.NewClients(
+		cfg.ValidationServiceAddr,
+		cfg.CollapseServiceAddr,
+		cfg.DataServiceAddr,
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize gRPC clients: %v", err)
+	}
+	defer grpcClients.Close()
+
+	// Store clients in handlers package
+	handlers.SetGRPCClients(grpcClients)
 
 	// Set Gin mode
 	if cfg.Environment == "production" {

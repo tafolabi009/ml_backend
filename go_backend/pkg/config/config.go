@@ -17,8 +17,9 @@ type Config struct {
 	S3Bucket    string
 	
 	// gRPC service addresses
-	ValidationEngineAddr string
-	DataServiceAddr      string
+	ValidationServiceAddr string
+	CollapseServiceAddr   string
+	DataServiceAddr       string
 }
 
 // Load reads configuration from environment variables
@@ -29,15 +30,16 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Environment:          getEnv("ENVIRONMENT", "development"),
-		Port:                 port,
-		DatabaseURL:          getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/synthos?sslmode=disable"),
-		RedisURL:             getEnv("REDIS_URL", "localhost:6379"),
-		JWTSecret:            getEnv("JWT_SECRET", "change-this-in-production"),
-		AWSRegion:            getEnv("AWS_REGION", "us-east-1"),
-		S3Bucket:             getEnv("S3_BUCKET", "synthos-datasets"),
-		ValidationEngineAddr: getEnv("VALIDATION_ENGINE_ADDR", "localhost:50051"),
-		DataServiceAddr:      getEnv("DATA_SERVICE_ADDR", "localhost:50052"),
+		Environment:           getEnv("ENVIRONMENT", "development"),
+		Port:                  port,
+		DatabaseURL:           getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/synthos?sslmode=disable"),
+		RedisURL:              getEnv("REDIS_URL", "localhost:6379"),
+		JWTSecret:             getEnv("JWT_SECRET", "change-this-in-production"),
+		AWSRegion:             getEnv("AWS_REGION", "us-east-1"),
+		S3Bucket:              getEnv("S3_BUCKET", "synthos-datasets"),
+		ValidationServiceAddr: getEnv("VALIDATION_SERVICE_ADDR", "localhost:50051"),
+		CollapseServiceAddr:   getEnv("COLLAPSE_SERVICE_ADDR", "localhost:50053"),
+		DataServiceAddr:       getEnv("DATA_SERVICE_ADDR", "localhost:50054"),
 	}
 
 	// Validate required fields in production
