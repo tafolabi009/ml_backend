@@ -17,21 +17,21 @@ import (
 // JobRepository handles job persistence
 type JobRepository struct {
 	db  *pgxpool.Pool
-	log *zap.Logger
+	log *logger.Logger
 }
 
 // NewJobRepository creates a new job repository
 func NewJobRepository(db *pgxpool.Pool) *JobRepository {
 	return &JobRepository{
 		db:  db,
-		log: logger.Get().With(zap.String("component", "job-repository")),
+		log: logger.Get().With("component", "job-repository"),
 	}
 }
 
 // CreateJob creates a new job in the database
 func (r *JobRepository) CreateJob(ctx context.Context, job *models.Job) error {
 	traceID := ctx.Value("trace_id")
-	log := r.log.With(zap.Any("trace_id", traceID), zap.String("job_id", job.ID))
+	log := r.log.With("trace_id", traceID, "job_id", job.ID)
 
 	config, err := json.Marshal(job.Config)
 	if err != nil {
@@ -94,7 +94,7 @@ func (r *JobRepository) GetJob(ctx context.Context, jobID string) (*models.Job, 
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("job not found: %s", jobID)
 		}
-		log.Error("Failed to get job", "error", err)
+		log.Error("Failed to get job", zap.Error(err))
 		return nil, fmt.Errorf("failed to get job: %w", err)
 	}
 
@@ -132,11 +132,11 @@ func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID string, statu
 
 	_, err := r.db.Exec(ctx, query, status, progress, errorMsg, time.Now(), jobID)
 	if err != nil {
-		log.Error("Failed to update job status", "error", err)
+		log.Error("Failed to update job status", zap.Error(err))
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	log.Info("Job status updated", "progress", progress)
+	log.Info("Job status updated", zap.Float32("progress", progress))
 	return nil
 }
 
@@ -157,7 +157,7 @@ func (r *JobRepository) UpdateJobResult(ctx context.Context, jobID string, resul
 
 	_, err = r.db.Exec(ctx, query, resultJSON, "completed", time.Now(), time.Now(), jobID)
 	if err != nil {
-		log.Error("Failed to update job result", "error", err)
+		log.Error("Failed to update job result", zap.Error(err))
 		return fmt.Errorf("failed to update job result: %w", err)
 	}
 

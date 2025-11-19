@@ -76,7 +76,7 @@ func InitiateUploadFiber(c *fiber.Ctx) error {
 		FileSize:    req.FileSize,
 		FileType:    req.FileType,
 		Status:      "uploading",
-		S3Path:      &s3Key,
+		S3Path:      s3Key,
 		Description: req.Description,
 		UploadedAt:  time.Now().UTC(),
 	}
@@ -287,7 +287,7 @@ func DeleteDatasetFiber(c *fiber.Ctx) error {
 	}
 
 	// Delete from S3 if S3 path exists
-	if dataset.S3Path != nil && *dataset.S3Path != "" {
+	if dataset.S3Path != "" {
 		s3Config := storage.S3Config{
 			Region:          "us-east-1",
 			Bucket:          "synthos-uploads",
@@ -299,7 +299,7 @@ func DeleteDatasetFiber(c *fiber.Ctx) error {
 		if err != nil {
 			log.Printf("Failed to initialize S3 client for deletion: %v", err)
 		} else {
-			if err := s3Client.Delete(ctx, *dataset.S3Path); err != nil {
+			if err := s3Client.Delete(ctx, dataset.S3Path); err != nil {
 				log.Printf("Failed to delete file from S3: %v", err)
 			}
 		}

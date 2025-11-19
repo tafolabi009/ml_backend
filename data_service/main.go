@@ -10,9 +10,9 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
-	
-	pb "github.com/tafolabi009/backend/proto/data"
+
 	"github.com/synthos/data-service/internal/service"
+	pb "github.com/tafolabi009/backend/proto/data"
 )
 
 func main() {
@@ -33,8 +33,8 @@ func main() {
 
 	// Create gRPC server with options
 	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(100 * 1024 * 1024), // 100MB
-		grpc.MaxSendMsgSize(100 * 1024 * 1024), // 100MB
+		grpc.MaxRecvMsgSize(100*1024*1024), // 100MB
+		grpc.MaxSendMsgSize(100*1024*1024), // 100MB
 	)
 
 	// Create and register data service

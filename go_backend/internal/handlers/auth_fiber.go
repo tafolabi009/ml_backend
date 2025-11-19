@@ -146,7 +146,7 @@ func LoginFiber(c *fiber.Ctx) error {
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    900, // 15 minutes in seconds
-		User:         user,
+		User:         *user,
 	}
 
 	return c.JSON(response)

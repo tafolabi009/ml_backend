@@ -13,10 +13,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
-	
-	validationpb "github.com/tafolabi009/backend/proto/validation"
+
 	collapsepb "github.com/tafolabi009/backend/proto/collapse"
 	datapb "github.com/tafolabi009/backend/proto/data"
+	validationpb "github.com/tafolabi009/backend/proto/validation"
 )
 
 // CircuitBreakerState represents the state of a circuit breaker
@@ -54,32 +54,32 @@ func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
 func (cb *CircuitBreaker) Call(fn func() error) error {
 	cb.mu.Lock()
 	state := cb.state
-	
+
 	// Check if circuit should transition from Open to HalfOpen
 	if state == StateOpen && time.Since(cb.lastFailureTime) > cb.timeout {
 		cb.state = StateHalfOpen
 		cb.successes = 0
 		state = StateHalfOpen
 	}
-	
+
 	// Reject if circuit is open
 	if state == StateOpen {
 		cb.mu.Unlock()
 		return fmt.Errorf("circuit breaker is open")
 	}
-	
+
 	cb.mu.Unlock()
-	
+
 	// Execute the function
 	err := fn()
-	
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	if err != nil {
 		cb.failures++
 		cb.lastFailureTime = time.Now()
-		
+
 		if cb.state == StateHalfOpen {
 			// Failed in half-open, go back to open
 			cb.state = StateOpen
@@ -90,7 +90,7 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 		}
 		return err
 	}
-	
+
 	// Success
 	if cb.state == StateHalfOpen {
 		cb.successes++
@@ -103,7 +103,7 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 	} else {
 		cb.failures = 0
 	}
-	
+
 	return nil
 }
 
@@ -119,23 +119,23 @@ type Clients struct {
 	Validation validationpb.ValidationServiceClient
 	Collapse   collapsepb.CollapseServiceClient
 	Data       datapb.DataServiceClient
-	
+
 	validationConn *grpc.ClientConn
 	collapseConn   *grpc.ClientConn
 	dataConn       *grpc.ClientConn
-	
+
 	validationCB *CircuitBreaker
 	collapseCB   *CircuitBreaker
 	dataCB       *CircuitBreaker
-	
+
 	retryConfig RetryConfig
 }
 
 // RetryConfig configures retry behavior
 type RetryConfig struct {
-	MaxAttempts     int
-	InitialBackoff  time.Duration
-	MaxBackoff      time.Duration
+	MaxAttempts       int
+	InitialBackoff    time.Duration
+	MaxBackoff        time.Duration
 	BackoffMultiplier float64
 }
 
@@ -155,7 +155,7 @@ func isRetryableError(err error) bool {
 	if !ok {
 		return false
 	}
-	
+
 	switch st.Code() {
 	case codes.Unavailable, codes.ResourceExhausted, codes.Aborted, codes.DeadlineExceeded:
 		return true
@@ -168,7 +168,7 @@ func isRetryableError(err error) bool {
 func (c *Clients) RetryWithBackoff(ctx context.Context, fn func() error) error {
 	var lastErr error
 	backoff := c.retryConfig.InitialBackoff
-	
+
 	for attempt := 0; attempt < c.retryConfig.MaxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
@@ -176,30 +176,30 @@ func (c *Clients) RetryWithBackoff(ctx context.Context, fn func() error) error {
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
-			
+
 			// Increase backoff for next attempt
 			backoff = time.Duration(float64(backoff) * c.retryConfig.BackoffMultiplier)
 			if backoff > c.retryConfig.MaxBackoff {
 				backoff = c.retryConfig.MaxBackoff
 			}
 		}
-		
+
 		err := fn()
 		if err == nil {
 			return nil
 		}
-		
+
 		lastErr = err
-		
+
 		// Don't retry non-retryable errors
 		if !isRetryableError(err) {
 			return err
 		}
-		
-		log.Printf("⚠️ Request failed (attempt %d/%d): %v. Retrying in %v...", 
+
+		log.Printf("⚠️ Request failed (attempt %d/%d): %v. Retrying in %v...",
 			attempt+1, c.retryConfig.MaxAttempts, err, backoff)
 	}
-	
+
 	return fmt.Errorf("max retry attempts exceeded: %w", lastErr)
 }
 
@@ -216,7 +216,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 		dataCB:       NewCircuitBreaker(5, 30*time.Second),
 		retryConfig:  retryConfig,
 	}
-	
+
 	// Common dial options with advanced connection settings
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -226,8 +226,8 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 			PermitWithoutStream: true,
 		}),
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(100 * 1024 * 1024), // 100MB
-			grpc.MaxCallSendMsgSize(100 * 1024 * 1024), // 100MB
+			grpc.MaxCallRecvMsgSize(100*1024*1024), // 100MB
+			grpc.MaxCallSendMsgSize(100*1024*1024), // 100MB
 		),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
@@ -241,7 +241,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 		// Enable automatic connection management
 		grpc.WithDisableHealthCheck(),
 	}
-	
+
 	// Connect to validation service
 	log.Printf("Connecting to Validation Service at %s", validationAddr)
 	validationConn, err := grpc.NewClient(validationAddr, dialOpts...)
@@ -250,7 +250,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 	}
 	clients.validationConn = validationConn
 	clients.Validation = validationpb.NewValidationServiceClient(validationConn)
-	
+
 	// Connect to collapse service
 	log.Printf("Connecting to Collapse Service at %s", collapseAddr)
 	collapseConn, err := grpc.NewClient(collapseAddr, dialOpts...)
@@ -260,7 +260,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 	}
 	clients.collapseConn = collapseConn
 	clients.Collapse = collapsepb.NewCollapseServiceClient(collapseConn)
-	
+
 	// Connect to data service
 	log.Printf("Connecting to Data Service at %s", dataAddr)
 	dataConn, err := grpc.NewClient(dataAddr, dialOpts...)
@@ -271,7 +271,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 	}
 	clients.dataConn = dataConn
 	clients.Data = datapb.NewDataServiceClient(dataConn)
-	
+
 	log.Println("✅ All gRPC clients connected successfully with circuit breakers and retry logic")
 	return clients, nil
 }
@@ -299,7 +299,7 @@ func (c *Clients) Health(ctx context.Context) error {
 	if err != nil && err.Error() != "rpc error: code = NotFound desc = Job health-check not found" {
 		return fmt.Errorf("validation service health check failed: %w", err)
 	}
-	
+
 	// Additional health checks can be added here
 	return nil
 }
@@ -338,7 +338,7 @@ func (c *Clients) GetCircuitBreakerStates() map[string]string {
 		StateOpen:     "open",
 		StateHalfOpen: "half-open",
 	}
-	
+
 	return map[string]string{
 		"validation": states[c.validationCB.GetState()],
 		"collapse":   states[c.collapseCB.GetState()],

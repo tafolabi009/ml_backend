@@ -1,6 +1,7 @@
 package pdfgen
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -168,10 +169,12 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 	pdf.Cell(0, 8, "This report is confidential and intended for the designated recipient only.")
 
 	// Get PDF bytes
-	var buf []byte
-	buf = pdf.Output(nil)
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
 	
-	return buf, nil
+	return buf.Bytes(), nil
 }
 
 // GenerateWarrantyCertificate generates a warranty certificate PDF
@@ -243,8 +246,10 @@ func GenerateWarrantyCertificate(validation *models.Validation, warrantyID strin
 	pdf.CellFormat(0, 8, "OFFICIAL SYNTHOS AI WARRANTY CERTIFICATE", "", 0, "C", false, 0, "")
 
 	// Get PDF bytes
-	var buf []byte
-	buf = pdf.Output(nil)
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
 	
-	return buf, nil
+	return buf.Bytes(), nil
 }

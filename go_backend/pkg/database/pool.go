@@ -1,5 +1,4 @@
 package database
-package database
 
 import (
 	"context"
@@ -7,134 +6,131 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	}		}			}				)					"max", stats.MaxConns,					"acquired", stats.AcquiredConns,				log.Warn("Connection pool exhausted",			if stats.AcquiredConns >= stats.MaxConns {			// Warn if pool is exhausted			)				"max", stats.MaxConns,				"acquired", stats.AcquiredConns,				"idle", stats.IdleConns,				"total", stats.TotalConns,			log.Debug("Pool statistics",			stats := GetPoolStats(pool)		case <-ticker.C:			return			log.Info("Pool monitor stopped")		case <-ctx.Done():		select {	for {	defer ticker.Stop()	ticker := time.NewTicker(interval)	log := logger.Get().With("component", "pool-monitor")func MonitorPool(ctx context.Context, pool *pgxpool.Pool, interval time.Duration) {// MonitorPool logs pool statistics periodically}	}		MaxConns:      config.MaxConns,		AcquiredConns: stats.AcquiredConns(),		IdleConns:     stats.IdleConns(),		TotalConns:    stats.TotalConns(),	return PoolStats{	config := pool.Config()	stats := pool.Stat()func GetPoolStats(pool *pgxpool.Pool) PoolStats {// GetPoolStats returns current pool statistics}	MaxConns      int32 `json:"max_conns"`	AcquiredConns int32 `json:"acquired_conns"`	IdleConns     int32 `json:"idle_conns"`	TotalConns    int32 `json:"total_conns"`type PoolStats struct {// PoolStats represents current pool statistics}	return pool, nil	)		"acquired_conns", stats.AcquiredConns(),		"idle_conns", stats.IdleConns(),		"total_conns", stats.TotalConns(),	log.Info("Database pool created successfully",	stats := pool.Stat()	// Log pool stats	}		return nil, fmt.Errorf("failed to ping database: %w", err)		pool.Close()	if err := pool.Ping(ctx); err != nil {	// Verify connection	}		return nil, fmt.Errorf("failed to create connection pool: %w", err)	if err != nil {	pool, err := pgxpool.NewWithConfig(ctx, config)	)		"max_lifetime", config.MaxConnLifetime,		"min_conns", config.MinConns,		"max_conns", config.MaxConns,	log.Info("Creating database connection pool",	// Create pool	config.ConnConfig.DefaultQueryExecMode = pgxpool.QueryExecModeSimpleProtocol	// Enable statement cache	config.ConnConfig.ConnectTimeout = poolConfig.ConnectTimeout	config.HealthCheckPeriod = poolConfig.HealthCheckPeriod	config.MaxConnIdleTime = poolConfig.MaxConnIdleTime	config.MaxConnLifetime = poolConfig.MaxConnLifetime	config.MinConns = poolConfig.MinConns	config.MaxConns = poolConfig.MaxConns	// Apply pool configuration	}		return nil, fmt.Errorf("failed to parse database config: %w", err)	if err != nil {	config, err := pgxpool.ParseConfig(dsn)	// Parse DSN and configure pool	}		poolConfig = DefaultPoolConfig()	if poolConfig == nil {	log := logger.Get().With("component", "database")func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.Pool, error) {// NewPool creates a new PostgreSQL connection pool with optimized settings}	}		ConnectTimeout:    10 * time.Second,		HealthCheckPeriod: time.Minute,		MaxConnIdleTime:   30 * time.Minute,		MaxConnLifetime:   time.Hour,		MinConns:          5,   // Min idle connections		MaxConns:          25,  // Max connections in pool	return &PoolConfig{func DefaultPoolConfig() *PoolConfig {// DefaultPoolConfig returns sensible defaults for production}	ConnectTimeout    time.Duration	HealthCheckPeriod time.Duration	MaxConnIdleTime   time.Duration	MaxConnLifetime   time.Duration	MinConns          int32	MaxConns          int32type PoolConfig struct {// PoolConfig represents database pool configuration)	"github.com/yourusername/go_backend/pkg/logger"
+	"github.com/tafolabi009/backend/go_backend/pkg/logger"
+)
+
+// PoolConfig represents database pool configuration
+type PoolConfig struct {
+	MaxConns          int32
+	MinConns          int32
+	MaxConnLifetime   time.Duration
+	MaxConnIdleTime   time.Duration
+	HealthCheckPeriod time.Duration
+	ConnectTimeout    time.Duration
+}
+
+// DefaultPoolConfig returns sensible defaults for production
+func DefaultPoolConfig() *PoolConfig {
+	return &PoolConfig{
+		MaxConns:          25,  // Max connections in pool
+		MinConns:          5,   // Min idle connections
+		MaxConnLifetime:   time.Hour,
+		MaxConnIdleTime:   30 * time.Minute,
+		HealthCheckPeriod: time.Minute,
+		ConnectTimeout:    10 * time.Second,
+	}
+}
+
+// NewPool creates a new PostgreSQL connection pool with optimized settings
+func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.Pool, error) {
+	log := logger.Get().With("component", "database")
+	
+	if poolConfig == nil {
+		poolConfig = DefaultPoolConfig()
+	}
+	
+	// Parse DSN and configure pool
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse database config: %w", err)
+	}
+	
+	// Apply pool configuration
+	config.MaxConns = poolConfig.MaxConns
+	config.MinConns = poolConfig.MinConns
+	config.MaxConnLifetime = poolConfig.MaxConnLifetime
+	config.MaxConnIdleTime = poolConfig.MaxConnIdleTime
+	config.HealthCheckPeriod = poolConfig.HealthCheckPeriod
+	config.ConnConfig.ConnectTimeout = poolConfig.ConnectTimeout
+	
+	// Enable statement cache
+	config.ConnConfig.DefaultQueryExecMode = pgxpool.QueryExecModeSimpleProtocol
+	
+	// Create pool
+	log.Info("Creating database connection pool",
+		"max_conns", config.MaxConns,
+		"min_conns", config.MinConns,
+		"max_lifetime", config.MaxConnLifetime,
+	)
+	
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	}
+	
+	// Verify connection
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+	
+	// Log pool stats
+	stats := pool.Stat()
+	log.Info("Database pool created successfully",
+		"total_conns", stats.TotalConns(),
+		"idle_conns", stats.IdleConns(),
+		"acquired_conns", stats.AcquiredConns(),
+	)
+	
+	return pool, nil
+}
+
+// PoolStats represents current pool statistics
+type PoolStats struct {
+	TotalConns    int32 `json:"total_conns"`
+	IdleConns     int32 `json:"idle_conns"`
+	AcquiredConns int32 `json:"acquired_conns"`
+	MaxConns      int32 `json:"max_conns"`
+}
+
+// GetPoolStats returns current pool statistics
+func GetPoolStats(pool *pgxpool.Pool) PoolStats {
+	stats := pool.Stat()
+	config := pool.Config()
+	return PoolStats{
+		TotalConns:    stats.TotalConns(),
+		IdleConns:     stats.IdleConns(),
+		AcquiredConns: stats.AcquiredConns(),
+		MaxConns:      config.MaxConns,
+	}
+}
+
+// MonitorPool logs pool statistics periodically
+func MonitorPool(ctx context.Context, pool *pgxpool.Pool, interval time.Duration) {
+	log := logger.Get().With("component", "pool-monitor")
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Pool monitor stopped")
+			return
+		case <-ticker.C:
+			stats := GetPoolStats(pool)
+			log.Debug("Pool statistics",
+				"total", stats.TotalConns,
+				"idle", stats.IdleConns,
+				"acquired", stats.AcquiredConns,
+				"max", stats.MaxConns,
+			)
+			// Warn if pool is exhausted
+			if stats.AcquiredConns >= stats.MaxConns {
+				log.Warn("Connection pool exhausted",
+					"acquired", stats.AcquiredConns,
+					"max", stats.MaxConns,
+				)
+			}
+		}
+	}
+}

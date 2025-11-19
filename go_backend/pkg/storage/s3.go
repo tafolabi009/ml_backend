@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -259,7 +260,7 @@ func (c *S3Client) Exists(ctx context.Context, key string) (bool, error) {
 	if err != nil {
 		// Check if it's a NotFound error
 		var notFound *types.NotFound
-		if aws.IsErrorAs(err, &notFound) {
+		if errors.As(err, &notFound) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check if file exists: %w", err)
@@ -354,7 +355,7 @@ func (c *S3Client) CreateBucket(ctx context.Context) error {
 		// Check if bucket already exists
 		var bucketAlreadyExists *types.BucketAlreadyExists
 		var bucketAlreadyOwnedByYou *types.BucketAlreadyOwnedByYou
-		if aws.IsErrorAs(err, &bucketAlreadyExists) || aws.IsErrorAs(err, &bucketAlreadyOwnedByYou) {
+		if errors.As(err, &bucketAlreadyExists) || errors.As(err, &bucketAlreadyOwnedByYou) {
 			log.Printf("Bucket %s already exists", c.config.Bucket)
 			return nil
 		}
