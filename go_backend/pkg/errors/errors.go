@@ -110,7 +110,7 @@ type ErrorResponse struct {
 // HandleError handles errors in Fiber context
 func HandleError(c *fiber.Ctx, err error) error {
 	traceID, _ := c.Locals("trace_id").(string)
-	
+
 	// Convert generic errors to AppError
 	appErr, ok := err.(*AppError)
 	if !ok {
@@ -119,7 +119,7 @@ func HandleError(c *fiber.Ctx, err error) error {
 	} else {
 		appErr.TraceID = traceID
 	}
-	
+
 	return c.Status(appErr.StatusCode).JSON(ErrorResponse{
 		Error: *appErr,
 	})

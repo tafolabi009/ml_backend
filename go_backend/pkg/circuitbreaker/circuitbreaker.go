@@ -59,7 +59,7 @@ func NewCircuitBreaker(config Config, logger *zap.Logger) *CircuitBreaker {
 			}
 		},
 	}
-	
+
 	return &CircuitBreaker{
 		cb:     gobreaker.NewCircuitBreaker(settings),
 		logger: logger,
@@ -75,11 +75,11 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (interface{}, e
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	result, err := cb.cb.Execute(func() (interface{}, error) {
 		return fn()
 	})
-	
+
 	if err != nil {
 		if err == gobreaker.ErrOpenState {
 			cb.logger.Warn("Circuit breaker is open",
@@ -94,7 +94,7 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (interface{}, e
 			return nil, fmt.Errorf("service unavailable: too many requests")
 		}
 	}
-	
+
 	return result, err
 }
 

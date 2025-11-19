@@ -22,8 +22,8 @@ type PoolConfig struct {
 // DefaultPoolConfig returns sensible defaults for production
 func DefaultPoolConfig() *PoolConfig {
 	return &PoolConfig{
-		MaxConns:          25,  // Max connections in pool
-		MinConns:          5,   // Min idle connections
+		MaxConns:          25, // Max connections in pool
+		MinConns:          5,  // Min idle connections
 		MaxConnLifetime:   time.Hour,
 		MaxConnIdleTime:   30 * time.Minute,
 		HealthCheckPeriod: time.Minute,
@@ -34,17 +34,17 @@ func DefaultPoolConfig() *PoolConfig {
 // NewPool creates a new PostgreSQL connection pool with optimized settings
 func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.Pool, error) {
 	log := logger.Get().With("component", "database")
-	
+
 	if poolConfig == nil {
 		poolConfig = DefaultPoolConfig()
 	}
-	
+
 	// Parse DSN and configure pool
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database config: %w", err)
 	}
-	
+
 	// Apply pool configuration
 	config.MaxConns = poolConfig.MaxConns
 	config.MinConns = poolConfig.MinConns
@@ -52,28 +52,28 @@ func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.
 	config.MaxConnIdleTime = poolConfig.MaxConnIdleTime
 	config.HealthCheckPeriod = poolConfig.HealthCheckPeriod
 	config.ConnConfig.ConnectTimeout = poolConfig.ConnectTimeout
-	
+
 	// Enable statement cache
 	config.ConnConfig.DefaultQueryExecMode = pgxpool.QueryExecModeSimpleProtocol
-	
+
 	// Create pool
 	log.Info("Creating database connection pool",
 		"max_conns", config.MaxConns,
 		"min_conns", config.MinConns,
 		"max_lifetime", config.MaxConnLifetime,
 	)
-	
+
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
-	
+
 	// Verify connection
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-	
+
 	// Log pool stats
 	stats := pool.Stat()
 	log.Info("Database pool created successfully",
@@ -81,7 +81,7 @@ func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.
 		"idle_conns", stats.IdleConns(),
 		"acquired_conns", stats.AcquiredConns(),
 	)
-	
+
 	return pool, nil
 }
 
@@ -110,7 +110,7 @@ func MonitorPool(ctx context.Context, pool *pgxpool.Pool, interval time.Duration
 	log := logger.Get().With("component", "pool-monitor")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():

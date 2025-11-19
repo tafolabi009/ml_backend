@@ -52,7 +52,7 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 	pdf.SetFont("Arial", "", 12)
 	pdf.SetTextColor(0, 0, 0)
 	pdf.Cell(50, 8, "Risk Score:")
-	
+
 	if validation.RiskScore != nil {
 		riskScore := *validation.RiskScore
 		if riskScore < 30 {
@@ -116,7 +116,7 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 		pdf.SetFont("Arial", "", 12)
 		pdf.Cell(60, 8, "Confidence Interval:")
 		pdf.SetFont("Arial", "B", 12)
-		pdf.Cell(0, 8, fmt.Sprintf("%.2f%% - %.2f%%", 
+		pdf.Cell(0, 8, fmt.Sprintf("%.2f%% - %.2f%%",
 			results.PredictedPerformance.ConfidenceInterval[0]*100,
 			results.PredictedPerformance.ConfidenceInterval[1]*100))
 		pdf.Ln(8)
@@ -146,7 +146,7 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 				pdf.SetTextColor(0, 0, 0)
 				pdf.Cell(90, 7, dim+":")
 				pdf.SetFont("Arial", "B", 11)
-				
+
 				if score >= 70 {
 					pdf.SetTextColor(0, 128, 0)
 				} else if score >= 50 {
@@ -173,7 +173,7 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 	if err := pdf.Output(&buf); err != nil {
 		return nil, err
 	}
-	
+
 	return buf.Bytes(), nil
 }
 
@@ -250,6 +250,6 @@ func GenerateWarrantyCertificate(validation *models.Validation, warrantyID strin
 	if err := pdf.Output(&buf); err != nil {
 		return nil, err
 	}
-	
+
 	return buf.Bytes(), nil
 }

@@ -84,13 +84,13 @@ func NewS3Client(ctx context.Context, cfg S3Config) (*S3Client, error) {
 	// Create upload and download managers with optimized settings
 	uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB parts
-		u.Concurrency = 5              // 5 concurrent uploads
+		u.Concurrency = 5             // 5 concurrent uploads
 		u.LeavePartsOnError = false
 	})
 
 	downloader := manager.NewDownloader(s3Client, func(d *manager.Downloader) {
 		d.PartSize = 10 * 1024 * 1024 // 10MB parts
-		d.Concurrency = 5              // 5 concurrent downloads
+		d.Concurrency = 5             // 5 concurrent downloads
 	})
 
 	client := &S3Client{
@@ -106,11 +106,11 @@ func NewS3Client(ctx context.Context, cfg S3Config) (*S3Client, error) {
 
 // UploadOptions holds options for file upload
 type UploadOptions struct {
-	ContentType     string
-	Metadata        map[string]string
-	StorageClass    types.StorageClass
+	ContentType          string
+	Metadata             map[string]string
+	StorageClass         types.StorageClass
 	ServerSideEncryption bool
-	ACL             types.ObjectCannedACL
+	ACL                  types.ObjectCannedACL
 }
 
 // Upload uploads a file to S3 with multipart upload support
