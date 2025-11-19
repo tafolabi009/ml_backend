@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 	
-	validationpb "github.com/tafolabi009/backend/proto/gen/go"
-	collapsepb "github.com/tafolabi009/backend/proto/gen/go"
-	datapb "github.com/tafolabi009/backend/proto/gen/go"
+	validationpb "github.com/tafolabi009/backend/proto/validation"
+	collapsepb "github.com/tafolabi009/backend/proto/collapse"
+	datapb "github.com/tafolabi009/backend/proto/data"
 )
 
 // CircuitBreakerState represents the state of a circuit breaker

@@ -2,6 +2,8 @@ module github.com/synthos/data-service
 
 go 1.21
 
+replace github.com/tafolabi009/backend/proto => ../proto/gen/go
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.21.2
 	github.com/aws/aws-sdk-go-v2/config v1.19.0

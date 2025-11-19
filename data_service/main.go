@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	
 	pb "github.com/tafolabi009/backend/proto/data"
-	"github.com/tafolabi009/backend/data_service/internal/service"
+	"github.com/synthos/data-service/internal/service"
 )
 
 func main() {

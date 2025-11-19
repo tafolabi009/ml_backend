@@ -1,80 +1,83 @@
 package logger
-package logger
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return nil	}		return log.Sync()	if log != nil {func Sync() error {// Sync flushes any buffered log entries}	return Get().With(fields...)func With(fields ...zap.Field) *zap.Logger {// With creates a child logger with the given fields}	Get().Fatal(msg, fields...)func Fatal(msg string, fields ...zap.Field) {// Fatal logs a fatal message and exits}	Get().Debug(msg, fields...)func Debug(msg string, fields ...zap.Field) {// Debug logs a debug message}	Get().Warn(msg, fields...)func Warn(msg string, fields ...zap.Field) {// Warn logs a warning message}	Get().Error(msg, fields...)func Error(msg string, fields ...zap.Field) {// Error logs an error message}	Get().Info(msg, fields...)func Info(msg string, fields ...zap.Field) {// Info logs an info message}	return log	}		log, _ = zap.NewDevelopment()		// Fallback to development logger	if log == nil {func Get() *zap.Logger {// Get returns the global logger}	return nil		}		return err	if err != nil {	log, err = config.Build(zap.AddCallerSkip(1))	var err error		}		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder		config = zap.NewDevelopmentConfig()	} else {		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder		config.EncoderConfig.TimeKey = "timestamp"		config = zap.NewProductionConfig()	if environment == "production" {		var config zap.Configfunc Init(environment string) error {// Init initializes the global loggervar log *zap.Logger)	"go.uber.org/zap/zapcore"	"go.uber.org/zap"	"go.uber.org/zap"import (
+import (
+"os"
+"sync"
+
+"go.uber.org/zap"
+"go.uber.org/zap/zapcore"
+)
+
+var (
+globalLogger *zap.Logger
+once         sync.Once
+)
+
+// Logger is a wrapper around zap.Logger
+type Logger struct {
+*zap.Logger
+}
+
+// Initialize sets up the global logger
+func Initialize(level string) error {
+var zapLevel zapcore.Level
+if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
+zapLevel = zapcore.InfoLevel
+}
+
+config := zap.NewProductionConfig()
+config.Level = zap.NewAtomicLevelAt(zapLevel)
+config.EncoderConfig.TimeKey = "timestamp"
+config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+config.OutputPaths = []string{"stdout"}
+config.ErrorOutputPaths = []string{"stderr"}
+
+logger, err := config.Build()
+if err != nil {
+return err
+}
+
+globalLogger = logger
+return nil
+}
+
+// Get returns the global logger instance
+func Get() *Logger {
+once.Do(func() {
+if globalLogger == nil {
+config := zap.NewProductionConfig()
+config.OutputPaths = []string{"stdout"}
+logger, _ := config.Build()
+globalLogger = logger
+}
+})
+return &Logger{globalLogger}
+}
+
+// With adds structured context to the logger
+func (l *Logger) With(fields ...interface{}) *Logger {
+zapFields := make([]zap.Field, 0, len(fields)/2)
+for i := 0; i < len(fields)-1; i += 2 {
+key, ok := fields[i].(string)
+if !ok {
+continue
+}
+zapFields = append(zapFields, zap.Any(key, fields[i+1]))
+}
+return &Logger{l.Logger.With(zapFields...)}
+}
+
+// Sync flushes any buffered log entries
+func Sync() {
+if globalLogger != nil {
+_ = globalLogger.Sync()
+}
+}
+
+func init() {
+level := os.Getenv("LOG_LEVEL")
+if level == "" {
+level = "info"
+}
+_ = Initialize(level)
+}

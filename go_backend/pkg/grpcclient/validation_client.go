@@ -11,7 +11,7 @@ import (
 
 	"github.com/tafolabi009/backend/go_backend/pkg/circuitbreaker"
 	"github.com/tafolabi009/backend/go_backend/pkg/logger"
-	pb "github.com/tafolabi009/backend/proto/gen/go"
+	pb "github.com/tafolabi009/backend/proto/validation"
 )
 
 // ValidationClient wraps gRPC validation service with circuit breaker
