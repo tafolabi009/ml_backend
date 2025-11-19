@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
-	
+
 	"github.com/tafolabi009/backend/go_backend/internal/models"
 	"github.com/tafolabi009/backend/go_backend/pkg/logger"
 )

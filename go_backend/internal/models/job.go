@@ -8,11 +8,11 @@ import (
 type Job struct {
 	ID           string                 `json:"id" db:"id"`
 	UserID       string                 `json:"user_id" db:"user_id"`
-	Type         string                 `json:"type" db:"type"` // validation, collapse, pipeline
+	Type         string                 `json:"type" db:"type"`     // validation, collapse, pipeline
 	Status       string                 `json:"status" db:"status"` // pending, running, completed, failed, cancelled
 	Priority     int                    `json:"priority" db:"priority"`
 	DatasetPath  string                 `json:"dataset_path" db:"dataset_path"`
-	Config       map[string]interface{} `json:"config" db:"config"` // JSONB
+	Config       map[string]interface{} `json:"config" db:"config"`           // JSONB
 	Result       map[string]interface{} `json:"result,omitempty" db:"result"` // JSONB
 	ErrorMessage string                 `json:"error_message,omitempty" db:"error_message"`
 	GPURequested int                    `json:"gpu_requested" db:"gpu_requested"`
