@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: #1e293b;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 12px rgba(0,0,0,0.3);
+        }
+        .card h3 {
+            color: #94a3b8;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+        }
+        .metric {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .metric-label {
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+        .progress-bar {
+            height: 8px;
+            background: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-healthy { background: #10b981; }
+        .status-warning { background: #f59e0b; }
+        .status-error { background: #ef4444; }
+        .jobs-table {
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .jobs-table h2 {
+            padding: 20px;
+            background: #334155;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+        th {
+            background: #334155;
+            color: #94a3b8;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+        }
+        tr:hover {
+            background: #334155;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge-queued { background: #3b82f6; color: #fff; }
+        .badge-running { background: #f59e0b; color: #fff; }
+        .badge-completed { background: #10b981; color: #fff; }
+        .badge-failed { background: #ef4444; color: #fff; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+        }
+        .error {
+            background: #7f1d1d;
+            color: #fca5a5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Synthos Admin Dashboard</h1>
+        <p>Real-time system monitoring and job orchestration</p>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>System Status</h3>
+            <div class="metric">
+                <span class="status-indicator status-healthy"></span>
+                <span id="system-status">Loading...</span>
+            </div>
+            <div class="metric-label">All services operational</div>
+        </div>
+
+        <div class="card">
+            <h3>Active Workers</h3>
+            <div class="metric" id="active-workers">-</div>
+            <div class="metric-label">out of <span id="total-workers">-</span> total</div>
+        </div>
+
+        <div class="card">
+            <h3>CPU Usage</h3>
+            <div class="metric" id="cpu-usage">-</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="cpu-progress" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Memory Usage</h3>
+            <div class="metric" id="memory-usage">-</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="memory-progress" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>GPU Usage</h3>
+            <div class="metric" id="gpu-usage">-</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="gpu-progress" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Total Jobs</h3>
+            <div class="metric" id="total-jobs">-</div>
+            <div class="metric-label">
+                <span id="queued-jobs">-</span> queued · 
+                <span id="running-jobs">-</span> running
+            </div>
+        </div>
+    </div>
+
+    <div class="jobs-table">
+        <h2>Recent Jobs</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Type</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Created</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody id="jobs-tbody">
+                <tr>
+                    <td colspan="7" class="loading">Loading jobs...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function fetchData() {
+            try {
+                // Fetch resource status
+                const statusResp = await fetch('/api/status');
+                const status = await statusResp.json();
+                
+                document.getElementById('system-status').textContent = 'Healthy';
+                document.getElementById('active-workers').textContent = status.active_workers || 0;
+                document.getElementById('total-workers').textContent = status.total_workers || 0;
+                
+                const cpuPercent = Math.round((status.used_cpu_cores / status.total_cpu_cores) * 100);
+                document.getElementById('cpu-usage').textContent = cpuPercent + '%';
+                document.getElementById('cpu-progress').style.width = cpuPercent + '%';
+                
+                const memPercent = Math.round((status.used_memory_gb / status.total_memory_gb) * 100);
+                document.getElementById('memory-usage').textContent = memPercent + '%';
+                document.getElementById('memory-progress').style.width = memPercent + '%';
+                
+                const gpuPercent = status.total_gpu_count > 0 ? 
+                    Math.round((status.used_gpu_count / status.total_gpu_count) * 100) : 0;
+                document.getElementById('gpu-usage').textContent = gpuPercent + '%';
+                document.getElementById('gpu-progress').style.width = gpuPercent + '%';
+
+                // Fetch jobs
+                const jobsResp = await fetch('/api/jobs');
+                const jobsData = await jobsResp.json();
+                const jobs = jobsData.jobs || [];
+                
+                document.getElementById('total-jobs').textContent = jobs.length;
+                const queued = jobs.filter(j => j.status === 'queued').length;
+                const running = jobs.filter(j => j.status === 'running').length;
+                document.getElementById('queued-jobs').textContent = queued;
+                document.getElementById('running-jobs').textContent = running;
+
+                // Populate jobs table
+                const tbody = document.getElementById('jobs-tbody');
+                if (jobs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading">No jobs found</td></tr>';
+                } else {
+                    tbody.innerHTML = jobs.map(job => `
+                        <tr>
+                            <td><code>${job.job_id || '-'}</code></td>
+                            <td>${job.job_type || '-'}</td>
+                            <td>${job.user_id || '-'}</td>
+                            <td><span class="badge badge-${job.status}">${job.status}</span></td>
+                            <td>${job.priority || '-'}</td>
+                            <td>${new Date(job.created_at).toLocaleString()}</td>
+                            <td>${job.duration || '-'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('system-status').textContent = 'Error';
+                document.querySelector('.status-indicator').className = 'status-indicator status-error';
+            }
+        }
+
+        // Initial fetch
+        fetchData();
+
+        // Refresh every 5 seconds
+        setInterval(fetchData, 5000);
+    </script>
+</body>
+</html>

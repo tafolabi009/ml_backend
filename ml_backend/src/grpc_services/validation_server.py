@@ -599,68 +599,82 @@ class CollapseEngineServicer:  # Will inherit from validation_pb2_grpc.CollapseE
     @handle_errors
     async def GenerateRecommendations(self, request, context):
         """
-        Phase 6: Generate actionable recommendations.
+        Phase 6: Generate actionable recommendations using advanced ML-based engine.
+        
+        This implementation uses the AdvancedRecommender which provides:
+        - ML-based impact prediction with confidence intervals
+        - Multi-objective optimization (impact vs cost vs time)
+        - Causal inference for recommendation validity
+        - Success probability estimation
+        - Dynamic prioritization based on resource constraints
         """
         logger.info(f"GenerateRecommendations called for validation {request.validation_id}")
         
         try:
-            # Import recommendation engine
-            from ..collapse_engine.recommender import RecommendationEngine
+            # Import advanced recommendation engine
+            from ..collapse_engine.recommender_advanced import AdvancedRecommender
             
-            logger.info("Generating recommendations...")
+            logger.info("Generating recommendations with ML-based engine...")
             
             # Get collapse scores (from request or previous detection)
             collapse_score = request.collapse_score if hasattr(request, 'collapse_score') else 75.0
-            dimension_scores = {}  # Would come from DetectCollapse
-            diversity_score = 70.0  # Would come from AnalyzeDiversity
+            dimension_scores = {}  # Would come from DetectCollapse response
+            diversity_score = 70.0  # Would come from AnalyzeDiversity response
             dataset_size = 1000000  # Would come from dataset metadata
             
-            # Generate recommendations
-            recommender = RecommendationEngine()
+            # Initialize advanced recommender with ML models
+            recommender = AdvancedRecommender()
+            
+            # Generate recommendations with full analysis:
+            # 1. Analyze problematic regions using statistical anomaly detection
+            # 2. Generate fix strategies using causal inference
+            # 3. Estimate impact using ML-based prediction models
+            # 4. Prioritize recommendations using multi-objective optimization
             result = await recommender.generate_recommendations(
                 collapse_score=collapse_score,
                 dimension_scores=dimension_scores,
                 diversity_score=diversity_score,
-                dataset_size=dataset_size
+                dataset_size=dataset_size,
+                compute_budget_hours=10.0,  # Available compute budget
+                cost_sensitivity=0.5,  # Balance between cost and impact
             )
             
-            # Convert to response format
+            # Convert to response format with full metadata
             recommendations = []
             for rec in result.recommendations:
-                recommendations.append({
+                recommendation_dict = {
+                    'id': rec.id if hasattr(rec, 'id') else f"rec_{len(recommendations)}",
                     'title': rec.title if hasattr(rec, 'title') else str(rec),
                     'description': rec.description if hasattr(rec, 'description') else '',
                     'priority': rec.priority.value if hasattr(rec, 'priority') and hasattr(rec.priority, 'value') else str(rec.priority) if hasattr(rec, 'priority') else 'medium',
-                    'estimated_impact': float(rec.estimated_impact if hasattr(rec, 'estimated_impact') else 0),
-                    'cost_usd': float(rec.cost_usd if hasattr(rec, 'cost_usd') else 0),
-                    'category': rec.category if hasattr(rec, 'category') else 'other'
-                })
+                    'estimated_impact': float(rec.impact_prediction.expected_improvement if hasattr(rec, 'impact_prediction') and hasattr(rec.impact_prediction, 'expected_improvement') else 0),
+                    'impact_confidence': rec.impact_prediction.confidence_level.value if hasattr(rec, 'impact_prediction') and hasattr(rec.impact_prediction, 'confidence_level') else 'medium',
+                    'success_probability': float(rec.impact_prediction.success_probability if hasattr(rec, 'impact_prediction') and hasattr(rec.impact_prediction, 'success_probability') else 0.5),
+                    'cost_usd': float(rec.cost_estimate.get_total_usd() if hasattr(rec, 'cost_estimate') and hasattr(rec.cost_estimate, 'get_total_usd') else 0),
+                    'effort_hours': float(rec.cost_estimate.effort_hours if hasattr(rec, 'cost_estimate') and hasattr(rec.cost_estimate, 'effort_hours') else 0),
+                    'category': rec.category.value if hasattr(rec, 'category') and hasattr(rec.category, 'value') else rec.category if hasattr(rec, 'category') else 'other',
+                    'implementation_steps': rec.implementation_steps if hasattr(rec, 'implementation_steps') else [],
+                    'prerequisites': rec.prerequisites if hasattr(rec, 'prerequisites') else [],
+                    'risks': rec.risks if hasattr(rec, 'risks') else [],
+                }
+                recommendations.append(recommendation_dict)
             
-            logger.info(f"Generated {len(recommendations)} recommendations")
+            logger.info(f"Generated {len(recommendations)} ML-powered recommendations with impact predictions")
             
             return {
                 'dataset_id': request.dataset_id,
                 'validation_id': request.validation_id,
                 'recommendations': recommendations,
                 'projected_improvement': float(result.projected_improvement if hasattr(result, 'projected_improvement') else 0),
-                'projected_score': float(result.projected_score if hasattr(result, 'projected_score') else collapse_score)
+                'projected_score': float(result.projected_score if hasattr(result, 'projected_score') else collapse_score),
+                'optimization_strategy': result.optimization_strategy if hasattr(result, 'optimization_strategy') else 'balanced',
+                'total_estimated_cost': sum(r['cost_usd'] for r in recommendations),
+                'total_estimated_impact': sum(r['estimated_impact'] for r in recommendations),
             }
             
         except Exception as e:
-            logger.error(f"Recommendation generation failed: {e}")
+            logger.error(f"Recommendation generation failed: {e}", exc_info=True)
             raise ModelError(f"Failed to generate recommendations: {str(e)}")
-        
-        # TODO: Implement recommendation generation
-        # 1. Analyze problematic regions
-        # 2. Generate fix strategies
-        # 3. Estimate impact
-        # 4. Prioritize recommendations
-        
-        return {
-            'dataset_id': request.dataset_id,
-            'validation_id': request.validation_id,
-            'recommendations': []
-        }
 
 
 # ============================================================================

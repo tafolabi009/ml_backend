@@ -4,19 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
 	"github.com/tafolabi009/backend/go_backend/internal/auth"
 	"github.com/tafolabi009/backend/go_backend/internal/handlers"
 	"github.com/tafolabi009/backend/go_backend/internal/middleware"
 	"github.com/tafolabi009/backend/go_backend/pkg/config"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
-	"github.com/tafolabi009/backend/go_backend/pkg/grpcclient"
+	"github.com/tafolabi009/backend/go_backend/pkg/monitoring"
+	"github.com/tafolabi009/backend/go_backend/pkg/orchestrator"
+	"github.com/tafolabi009/backend/go_backend/pkg/tracing"
 )
 
 func main() {
@@ -35,128 +40,195 @@ func main() {
 	}
 	defer database.Close()
 
-	// Initialize gRPC clients
-	grpcClients, err := grpcclient.NewClients(
-		cfg.ValidationServiceAddr,
-		cfg.CollapseServiceAddr,
-		cfg.DataServiceAddr,
-	)
+	// Initialize orchestrator client (replaces direct gRPC clients)
+	orchestratorClient, err := orchestrator.NewClient(cfg.OrchestratorAddr)
 	if err != nil {
-		log.Fatalf("Failed to initialize gRPC clients: %v", err)
+		log.Fatalf("Failed to initialize orchestrator client: %v", err)
 	}
-	defer grpcClients.Close()
+	defer orchestratorClient.Close()
 
-	// Store clients in handlers package
-	handlers.SetGRPCClients(grpcClients)
+	// Store orchestrator client in handlers package
+	handlers.SetOrchestratorClient(orchestratorClient)
 
-	// Set Gin mode
-	if cfg.Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
+	// Initialize Jaeger tracing (optional)
+	if os.Getenv("ENABLE_TRACING") == "true" {
+		jaegerEndpoint := os.Getenv("JAEGER_ENDPOINT")
+		if jaegerEndpoint == "" {
+			jaegerEndpoint = "localhost:6831"
+		}
+		
+		tracer, closer, err := tracing.InitJaeger("synthos-api-gateway", jaegerEndpoint)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize Jaeger tracer: %v", err)
+		} else {
+			defer closer.Close()
+			log.Printf("Jaeger tracer initialized: %s", jaegerEndpoint)
+			_ = tracer // Use tracer to avoid unused warning
+		}
 	}
 
-	// Initialize router
-	router := gin.New()
+	// Create Fiber app
+	app := fiber.New(fiber.Config{
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		BodyLimit:    100 * 1024 * 1024, // 100MB
+		ErrorHandler: customErrorHandler,
+		AppName:      "Synthos API Gateway v1.0.0",
+	})
 
 	// Global middleware
-	router.Use(gin.Recovery())
-	router.Use(middleware.Logger())
-	router.Use(middleware.CORS())
-	router.Use(middleware.ErrorHandler())
+	app.Use(recover.New())
+	app.Use(logger.New(logger.Config{
+		Format:     "${time} ${status} - ${method} ${path} ${latency}\n",
+		TimeFormat: "2006-01-02 15:04:05",
+		TimeZone:   "UTC",
+	}))
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders: "Content-Type,Authorization",
+	}))
+
+	// Prometheus metrics middleware (if enabled)
+	if os.Getenv("ENABLE_METRICS") == "true" {
+		app.Use(monitoring.PrometheusMiddleware())
+		log.Println("Prometheus metrics enabled at /metrics")
+	}
+
+	// Jaeger tracing middleware (if enabled)
+	if os.Getenv("ENABLE_TRACING") == "true" {
+		app.Use(tracing.TracingMiddleware())
+		log.Println("Jaeger distributed tracing enabled")
+	}
 
 	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
 			"status":  "healthy",
 			"service": "synthos-api-gateway",
 			"version": "1.0.0",
+			"time":    time.Now().Unix(),
 		})
 	})
 
+	// Prometheus metrics endpoint (if enabled)
+	if os.Getenv("ENABLE_METRICS") == "true" {
+		app.Get("/metrics", monitoring.MetricsHandler())
+	}
+
 	// API v1 routes
-	v1 := router.Group("/api/v1")
+	v1 := app.Group("/api/v1")
 	{
 		// Auth routes (public)
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/register", handlers.Register)
-			auth.POST("/login", handlers.Login)
-			auth.POST("/refresh", handlers.RefreshToken)
+			auth.Post("/register", handlers.RegisterFiber)
+			auth.Post("/login", handlers.LoginFiber)
+			auth.Post("/refresh", handlers.RefreshTokenFiber)
 		}
 
 		// Protected routes (require authentication)
-		protected := v1.Group("")
-		protected.Use(middleware.AuthRequired())
+		protected := v1.Group("", middleware.AuthRequiredFiber())
 		{
 			// Dataset management
 			datasets := protected.Group("/datasets")
 			{
-				datasets.POST("/upload", handlers.InitiateUpload)
-				datasets.POST("/:id/complete", handlers.CompleteUpload)
-				datasets.GET("", handlers.ListDatasets)
-				datasets.GET("/:id", handlers.GetDataset)
-				datasets.DELETE("/:id", handlers.DeleteDataset)
+				datasets.Post("/upload", handlers.InitiateUploadFiber)
+				datasets.Post("/:id/complete", handlers.CompleteUploadFiber)
+				datasets.Get("", handlers.ListDatasetsFiber)
+				datasets.Get("/:id", handlers.GetDatasetFiber)
+				datasets.Delete("/:id", handlers.DeleteDatasetFiber)
 			}
 
 			// Validation jobs
 			validations := protected.Group("/validations")
 			{
-				validations.POST("/create", handlers.CreateValidation)
-				validations.GET("", handlers.ListValidations)
-				validations.GET("/:id", handlers.GetValidation)
-				validations.GET("/:id/report", handlers.GetValidationReport)
-				validations.GET("/:id/certificate", handlers.GetValidationCertificate)
-				validations.GET("/:id/collapse-details", handlers.GetCollapseDetails)
-				validations.GET("/:id/recommendations", handlers.GetRecommendations)
+				validations.Post("/create", handlers.CreateValidationFiber)
+				validations.Get("", handlers.ListValidationsFiber)
+				validations.Get("/:id", handlers.GetValidationFiber)
+				validations.Get("/:id/report", handlers.GetValidationReportFiber)
+				validations.Get("/:id/certificate", handlers.GetValidationCertificateFiber)
+				validations.Get("/:id/collapse-details", handlers.GetCollapseDetailsFiber)
+				validations.Get("/:id/recommendations", handlers.GetRecommendationsFiber)
 			}
 
 			// Warranty management
 			warranties := protected.Group("/warranties")
 			{
-				warranties.POST("/:validation_id/request", handlers.RequestWarranty)
-				warranties.GET("", handlers.ListWarranties)
-				warranties.GET("/:id", handlers.GetWarranty)
-				warranties.POST("/:id/claim", handlers.FileWarrantyClaim)
+				warranties.Post("/:validation_id/request", handlers.RequestWarrantyFiber)
+				warranties.Get("", handlers.ListWarrantiesFiber)
+				warranties.Get("/:id", handlers.GetWarrantyFiber)
+				warranties.Post("/:id/claim", handlers.FileWarrantyClaimFiber)
 			}
 
 			// Analytics
 			analytics := protected.Group("/analytics")
 			{
-				analytics.GET("/usage", handlers.GetUsageAnalytics)
-				analytics.GET("/validation-history", handlers.GetValidationHistory)
+				analytics.Get("/usage", handlers.GetUsageAnalyticsFiber)
+				analytics.Get("/validation-history", handlers.GetValidationHistoryFiber)
 			}
 		}
 	}
 
-	// Create server
-	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	// Start server
+	port := cfg.Port
+	if port == 0 {
+		port = 8000
 	}
 
-	// Start server in goroutine
-	go func() {
-		log.Printf("Starting Synthos API Gateway on port %d", cfg.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
-		}
-	}()
-
-	// Wait for interrupt signal to gracefully shutdown the server
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
 
-	// Graceful shutdown with 5 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	go func() {
+		<-quit
+		log.Println("Shutting down server...")
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := app.ShutdownWithContext(ctx); err != nil {
+			log.Fatal("Server forced to shutdown:", err)
+		}
+
+		log.Println("Server exited")
+	}()
+
+	log.Printf("Starting Synthos API Gateway on port %d", port)
+	if err := app.Listen(fmt.Sprintf(":%d", port)); err != nil {
+		log.Fatal("Server failed to start:", err)
+	}
+}
+
+// customErrorHandler handles errors in a consistent format
+func customErrorHandler(c *fiber.Ctx, err error) error {
+	code := fiber.StatusInternalServerError
+	errorCode := "INTERNAL_SERVER_ERROR"
+	message := "An unexpected error occurred"
+
+	if e, ok := err.(*fiber.Error); ok {
+		code = e.Code
+		message = e.Message
+
+		switch code {
+		case fiber.StatusBadRequest:
+			errorCode = "BAD_REQUEST"
+		case fiber.StatusUnauthorized:
+			errorCode = "UNAUTHORIZED"
+		case fiber.StatusForbidden:
+			errorCode = "FORBIDDEN"
+		case fiber.StatusNotFound:
+			errorCode = "NOT_FOUND"
+		case fiber.StatusConflict:
+			errorCode = "CONFLICT"
+		}
 	}
 
-	log.Println("Server exited")
+	return c.Status(code).JSON(fiber.Map{
+		"error": fiber.Map{
+			"code":    errorCode,
+			"message": message,
+		},
+	})
 }

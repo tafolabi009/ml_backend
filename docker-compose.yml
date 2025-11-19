@@ -146,7 +146,7 @@ services:
       dockerfile: Dockerfile
     container_name: synthos-collapse-service
     environment:
-      COLLAPSE_SERVICE_PORT: 50053
+      COLLAPSE_SERVICE_PORT: 50052
       COLLAPSE_SERVICE_HOST: 0.0.0.0
       
       # GPU Configuration
@@ -193,7 +193,7 @@ services:
       # TLS (disabled for dev)
       TLS_ENABLED: "false"
     ports:
-      - "50053:50053"
+      - "50052:50052"
     volumes:
       - ./collapse_service:/app
       - collapse_signatures:/data/signatures
@@ -217,7 +217,7 @@ services:
   # Go Microservices
   # ============================================
 
-  # API Gateway (Customer-facing REST API)
+  # API Gateway (Customer-facing REST API - Fiber)
   api-gateway:
     build:
       context: ./go_backend
@@ -225,7 +225,7 @@ services:
     container_name: synthos-api-gateway
     environment:
       ENVIRONMENT: development
-      PORT: 8080
+      PORT: 8000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
       REDIS_URL: redis:6379
       REDIS_PASSWORD: redis_password
@@ -238,17 +238,18 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       
-      # Service addresses (gRPC)
-      JOB_ORCHESTRATOR_ADDR: job-orchestrator:50052
-      DATA_SERVICE_ADDR: data-service:50054
-      VALIDATION_SERVICE_ADDR: validation-service:50051
-      COLLAPSE_SERVICE_ADDR: collapse-service:50053
+      # Job Orchestrator (REST API)
+      ORCHESTRATOR_ADDR: job-orchestrator:8080
+      
+      # Tracing
+      JAEGER_ENDPOINT: jaeger:6831
       
       # Feature flags
       ENABLE_METRICS: "true"
       ENABLE_CORS: "true"
+      ENABLE_TRACING: "true"
     ports:
-      - "8080:8080"
+      - "8000:8000"
     volumes:
       - ./go_backend:/app
     depends_on:
@@ -258,16 +259,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      job-orchestrator:
+        condition: service_started
     networks:
       - synthos-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Job Orchestrator (Coordinates validation pipeline)
+  # Job Orchestrator (Central Pipeline Controller)
   job-orchestrator:
     build:
       context: ./job_orchestrator
@@ -275,15 +278,23 @@ services:
     container_name: synthos-job-orchestrator
     environment:
       ENVIRONMENT: development
-      PORT: 50052
+      # REST API Port
+      HTTP_PORT: 8080
+      # gRPC Port (legacy support)
+      GRPC_PORT: 50053
+      
+      # Worker pool configuration
+      WORKERS: 10
+      
+      # ML Service addresses (gRPC)
+      VALIDATION_SERVICE_ADDR: validation-service:50051
+      COLLAPSE_SERVICE_ADDR: collapse-service:50053
+      DATA_SERVICE_ADDR: data-service:50054
+      
+      # Database
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
       REDIS_URL: redis:6379
       REDIS_PASSWORD: redis_password
-      
-      # Service addresses (gRPC)
-      VALIDATION_ENGINE_ADDR: validation-engine:50051
-      COLLAPSE_ENGINE_ADDR: collapse-engine:50053
-      DATA_SERVICE_ADDR: data-service:50054
       
       # TLS Configuration (disabled for development)
       TLS_ENABLED: "false"
@@ -295,7 +306,8 @@ services:
       ENABLE_METRICS: "true"
       ENABLE_TRACING: "false"
     ports:
-      - "50052:50052"
+      - "8080:8080"   # REST API
+      - "50053:50053" # gRPC (legacy)
     volumes:
       - ./job_orchestrator:/app
     depends_on:
@@ -303,9 +315,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      validation-service:
+        condition: service_started
+      collapse-service:
+        condition: service_started
+      data-service:
+        condition: service_started
     networks:
       - synthos-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Data Service (Dataset management & S3)
   data-service:
@@ -388,6 +411,50 @@ services:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
     depends_on:
       - prometheus
+    networks:
+      - synthos-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Jaeger (Distributed tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: synthos-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+    ports:
+      - "5775:5775/udp"  # accept zipkin.thrift over compact thrift protocol (deprecated, used by legacy clients only)
+      - "6831:6831/udp"  # accept jaeger.thrift over compact thrift protocol
+      - "6832:6832/udp"  # accept jaeger.thrift over binary thrift protocol
+      - "5778:5778"      # serve configs
+      - "16686:16686"    # serve frontend
+      - "14268:14268"    # accept jaeger.thrift directly from clients
+      - "14250:14250"    # accept model.proto
+      - "9411:9411"      # Zipkin compatible endpoint (optional)
+    networks:
+      - synthos-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Admin Dashboard
+  admin-dashboard:
+    build:
+      context: ./admin_dashboard
+      dockerfile: Dockerfile
+    container_name: synthos-admin-dashboard
+    environment:
+      ORCHESTRATOR_ADDR: http://job-orchestrator:8080
+      ADMIN_PORT: 3001
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./admin_dashboard:/app
+    depends_on:
+      - job-orchestrator
     networks:
       - synthos-network
     restart: unless-stopped

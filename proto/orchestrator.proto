@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package orchestrator;
+
+option go_package = "github.com/tafolabi009/backend/proto/orchestrator";
+
+// Job Orchestrator Service - Manages job queue and execution
+service JobOrchestrator {
+  // Create a new job
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+  
+  // Get job status
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  
+  // Cancel a job
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  
+  // List jobs
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  
+  // Update job status (internal use)
+  rpc UpdateJobStatus(UpdateJobStatusRequest) returns (UpdateJobStatusResponse);
+}
+
+message CreateJobRequest {
+  string user_id = 1;
+  string job_type = 2;  // validation, collapse_detection, data_processing
+  int32 priority = 3;   // 1-10, higher is more urgent
+  map<string, string> payload = 4;
+}
+
+message CreateJobResponse {
+  string job_id = 1;
+  string status = 2;
+  int64 estimated_start_time = 3;
+  int32 queue_position = 4;
+}
+
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  string job_id = 1;
+  string status = 2;
+  string job_type = 3;
+  int32 priority = 4;
+  map<string, string> result = 5;
+  string error_message = 6;
+  int64 created_at = 7;
+  int64 started_at = 8;
+  int64 completed_at = 9;
+  float progress_percentage = 10;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+  string reason = 2;
+}
+
+message CancelJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListJobsRequest {
+  string user_id = 1;
+  string status_filter = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListJobsResponse {
+  repeated JobInfo jobs = 1;
+  int32 total_count = 2;
+}
+
+message JobInfo {
+  string job_id = 1;
+  string job_type = 2;
+  string status = 3;
+  int32 priority = 4;
+  int64 created_at = 5;
+  int64 started_at = 6;
+  int64 completed_at = 7;
+}
+
+message UpdateJobStatusRequest {
+  string job_id = 1;
+  string status = 2;
+  map<string, string> result = 3;
+  string error_message = 4;
+  float progress_percentage = 5;
+}
+
+message UpdateJobStatusResponse {
+  bool success = 1;
+}

@@ -15,8 +15,11 @@ type Config struct {
 	JWTSecret   string
 	AWSRegion   string
 	S3Bucket    string
-	
-	// gRPC service addresses
+
+	// Job Orchestrator address (replaces direct gRPC connections)
+	OrchestratorAddr string
+
+	// Legacy gRPC service addresses (deprecated, use orchestrator)
 	ValidationServiceAddr string
 	CollapseServiceAddr   string
 	DataServiceAddr       string
@@ -37,8 +40,9 @@ func Load() (*Config, error) {
 		JWTSecret:             getEnv("JWT_SECRET", "change-this-in-production"),
 		AWSRegion:             getEnv("AWS_REGION", "us-east-1"),
 		S3Bucket:              getEnv("S3_BUCKET", "synthos-datasets"),
+		OrchestratorAddr:      getEnv("ORCHESTRATOR_ADDR", "localhost:8080"),
 		ValidationServiceAddr: getEnv("VALIDATION_SERVICE_ADDR", "localhost:50051"),
-		CollapseServiceAddr:   getEnv("COLLAPSE_SERVICE_ADDR", "localhost:50053"),
+		CollapseServiceAddr:   getEnv("COLLAPSE_SERVICE_ADDR", "localhost:50052"),
 		DataServiceAddr:       getEnv("DATA_SERVICE_ADDR", "localhost:50054"),
 	}
 
