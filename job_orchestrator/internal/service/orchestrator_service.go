@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/google/uuid"
-	"github.com/tafolabi009/backend/job_orchestrator/internal/api"
 	collapsepb "github.com/tafolabi009/backend/proto/collapse"
 	datapb "github.com/tafolabi009/backend/proto/data"
 	validationpb "github.com/tafolabi009/backend/proto/validation"
@@ -164,7 +163,7 @@ func (s *OrchestratorService) ListJobs(ctx context.Context, userID string, statu
 }
 
 // CreateValidationPipeline creates a validation-only pipeline
-func (s *OrchestratorService) CreateValidationPipeline(ctx context.Context, req api.CreateValidationPipelineRequest) (*Pipeline, error) {
+func (s *OrchestratorService) CreateValidationPipeline(ctx context.Context, req CreateValidationPipelineRequest) (*Pipeline, error) {
 	pipelineID := "pipeline_" + uuid.New().String()[:8]
 
 	stages := []PipelineStage{
@@ -196,7 +195,7 @@ func (s *OrchestratorService) CreateValidationPipeline(ctx context.Context, req 
 }
 
 // CreateFullPipeline creates a full pipeline with validation and collapse detection
-func (s *OrchestratorService) CreateFullPipeline(ctx context.Context, req api.CreateFullPipelineRequest) (*Pipeline, error) {
+func (s *OrchestratorService) CreateFullPipeline(ctx context.Context, req CreateFullPipelineRequest) (*Pipeline, error) {
 	pipelineID := "pipeline_" + uuid.New().String()[:8]
 
 	stages := []PipelineStage{}

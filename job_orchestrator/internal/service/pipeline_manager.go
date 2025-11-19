@@ -6,8 +6,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/tafolabi009/backend/job_orchestrator/internal/api"
 )
 
 // Pipeline represents an orchestrated workflow
@@ -136,7 +134,7 @@ func (pm *PipelineManager) UpdateStageStatus(pipelineID, stageName string, statu
 }
 
 // Pipeline execution methods
-func (s *OrchestratorService) executeValidationPipeline(ctx context.Context, pipeline *Pipeline, req api.CreateValidationPipelineRequest) {
+func (s *OrchestratorService) executeValidationPipeline(ctx context.Context, pipeline *Pipeline, req CreateValidationPipelineRequest) {
 	log.Printf("Starting validation pipeline %s", pipeline.ID)
 
 	s.pipelineManager.UpdatePipelineStatus(pipeline.ID, StatusRunning, "diversity_analysis", 0)
@@ -166,7 +164,7 @@ func (s *OrchestratorService) executeValidationPipeline(ctx context.Context, pip
 	log.Printf("Validation pipeline %s completed successfully", pipeline.ID)
 }
 
-func (s *OrchestratorService) executeFullPipeline(ctx context.Context, pipeline *Pipeline, req api.CreateFullPipelineRequest) {
+func (s *OrchestratorService) executeFullPipeline(ctx context.Context, pipeline *Pipeline, req CreateFullPipelineRequest) {
 	log.Printf("Starting full pipeline %s", pipeline.ID)
 
 	totalStages := len(pipeline.Stages)
