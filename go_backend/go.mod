@@ -1,6 +1,6 @@
 module github.com/tafolabi009/backend/go_backend
 
-go 1.24.5
+go 1.23
 
 replace github.com/tafolabi009/backend/proto => ../proto/gen/go
 

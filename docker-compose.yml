@@ -136,13 +136,14 @@ services:
     networks:
       - synthos-network
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 4
-              capabilities: [gpu]
+    # GPU support - uncomment when running on GPU-enabled host
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 4
+    #           capabilities: [gpu]
 
   # ============================================
   # Go Microservices
@@ -151,8 +152,8 @@ services:
   # API Gateway (Customer-facing REST API - Fiber)
   api-gateway:
     build:
-      context: ./go_backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./go_backend/Dockerfile
     container_name: synthos-api-gateway
     environment:
       ENVIRONMENT: development
@@ -204,8 +205,8 @@ services:
   # Job Orchestrator (Central Pipeline Controller)
   job-orchestrator:
     build:
-      context: ./job_orchestrator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./job_orchestrator/Dockerfile
     container_name: synthos-job-orchestrator
     environment:
       ENVIRONMENT: development
@@ -260,8 +261,8 @@ services:
   # Data Service (Dataset management & S3)
   data-service:
     build:
-      context: ./data_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./data_service/Dockerfile
     container_name: synthos-data-service
     environment:
       ENVIRONMENT: development

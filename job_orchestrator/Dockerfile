@@ -1,19 +1,22 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /build
 
 # Install build dependencies
 RUN apk add --no-cache git
 
-# Copy go mod files
-COPY go.mod go.sum* ./
+# Copy proto files to parent directory (for go.mod replace directive)
+COPY proto/gen/go /proto/gen/go
+
+# Copy job_orchestrator files
+COPY job_orchestrator/go.mod job_orchestrator/go.sum* ./
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY job_orchestrator/ .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o job-orchestrator ./main.go

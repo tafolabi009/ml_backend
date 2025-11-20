@@ -71,6 +71,7 @@ try:
         HolographicModalityBinder,
     )
     RESONANCE_AVAILABLE = True
+    
 except ImportError as e:
     print(f"Warning: Could not import resonance_nn: {e}")
     print("Install with: pip install git+https://github.com/tafolabi009/NEURON_NEW.git")

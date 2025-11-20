@@ -1,17 +1,20 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy proto files to parent directory (for go.mod replace directive)
+COPY proto/gen/go /proto/gen/go
+
+# Copy go_backend files
+COPY go_backend/go.mod go_backend/go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY go_backend/ .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api cmd/api/main.go
