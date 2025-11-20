@@ -74,7 +74,55 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import resonance_nn: {e}")
     print("Install with: pip install git+https://github.com/tafolabi009/NEURON_NEW.git")
+    print("Using mock implementations for testing...")
     RESONANCE_AVAILABLE = False
+    
+    # Create mock classes when resonance_nn not available
+    class MockResonanceModule(torch.nn.Module):
+        """Mock implementation when resonance_nn is not installed"""
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self.mock = True
+            
+        def forward(self, x):
+            return x
+    
+    # Mock all imports
+    ResonanceNet = MockResonanceModule
+    ResonanceEncoder = MockResonanceModule
+    ResonanceAutoencoder = MockResonanceModule
+    ResonanceClassifier = MockResonanceModule
+    ResonanceLanguageModel = MockResonanceModule
+    ResonanceCausalLM = MockResonanceModule
+    ResonanceCodeModel = MockResonanceModule
+    ResonanceVisionModel = MockResonanceModule
+    ResonanceAudioModel = MockResonanceModule
+    LongContextResonanceNet = MockResonanceModule
+    StreamingLongContextNet = MockResonanceModule
+    ResonanceLayer = MockResonanceModule
+    MultiScaleResonanceLayer = MockResonanceModule
+    AdaptiveResonanceLayer = MockResonanceModule
+    ComplexWeight = MockResonanceModule
+    HolographicMemory = MockResonanceModule
+    HierarchicalVocabularyEmbedding = MockResonanceModule
+    FrequencyCompressedEmbedding = MockResonanceModule
+    AdaptiveEmbedding = MockResonanceModule
+    ResonanceHashEmbedding = MockResonanceModule
+    FrequencyPositionalEncoding = MockResonanceModule
+    ResonanceTrainer = object
+    ResonanceAutoEncoderTrainer = object
+    ResonanceClassifierTrainer = object
+    ResonanceVisionEncoder = MockResonanceModule
+    ResonanceAudioEncoder = MockResonanceModule
+    MultiModalResonanceFusion = MockResonanceModule
+    CrossModalResonance = MockResonanceModule
+    HolographicModalityBinder = MockResonanceModule
+    
+    def create_criterion(*args, **kwargs):
+        return torch.nn.MSELoss()
+    
+    def create_trainer(*args, **kwargs):
+        return None
 
 
 # Model size configurations matching config/ml_config.yaml

@@ -1,5 +1,5 @@
 # ML Model Configuration
-# Uses Resonance NN (FFT-based Spectral) + Temporal Eigenstate Networks
+# Uses Resonance NN (FFT-based Spectral)
 # NO ATTENTION MECHANISM - Pure spectral processing via FFT
 
 architecture_config:
@@ -7,11 +7,8 @@ architecture_config:
   primary_architecture: "resonance_nn"
   architecture_type: "spectral_fft"  # FFT-based, not transformer-based
   
-  # Secondary: Temporal Eigenstate Networks (for temporal/sequence data)
-  secondary_architecture: "temporal_eigenstate"
-  
   # Automatically choose based on data type
-  auto_select_architecture: true
+  auto_select_architecture: false
   
   # Key: These use AdvancedSpectralGating (ASG) not attention!
   uses_attention: false
@@ -54,20 +51,6 @@ resonance_nn_config:
     num_frequency_heads: 12
     training_rows: 20000000
     fft_dim: 768
-
-temporal_eigenstate_config:
-  # For time-series and sequential data
-  # Uses: TemporalFlowCell + EigenstateAttention + ResonanceBlock
-  use_for_temporal_data: true
-  eigenstate_dimension: 512
-  num_eigenstates: 128
-  temporal_resolution: "adaptive"
-  use_hierarchical: true  # HierarchicalTEN for multi-scale
-  
-  # Eigenstate-specific parameters
-  resonance_coupling: 0.1
-  temporal_flow_steps: 16
-  eigenstate_decay: 0.99
 
 cascade_training:
   # Multi-scale validation strategy

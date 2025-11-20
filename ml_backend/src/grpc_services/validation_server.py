@@ -753,14 +753,6 @@ async def serve(
     validation_servicer = ValidationEngineServicer(config, hardware_config)
     collapse_servicer = CollapseEngineServicer(config)
     
-    # TODO: Register servicers with generated protobuf code
-    # validation_pb2_grpc.add_ValidationEngineServicer_to_server(
-    #     validation_servicer, server
-    # )
-    # validation_pb2_grpc.add_CollapseEngineServicer_to_server(
-    #     collapse_servicer, server
-    # )
-    
     # Configure server with mTLS
     if use_mtls:
         credentials = load_mtls_credentials(

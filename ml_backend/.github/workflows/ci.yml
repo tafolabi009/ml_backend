@@ -37,8 +37,7 @@ jobs:
 
     - name: Install local wheel packages
       run: |
-        pip install packages/resonance_nn-0.1.0-py3-none-any.whl || echo "Warning: resonance_nn not installed"
-        pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl || echo "Warning: TEN not installed"
+        pip install packages/resonance_nn-0.1.0-py3-none-any.whl || echo "Warning: Resonance NN not installed"
       continue-on-error: true
 
     - name: Run linting

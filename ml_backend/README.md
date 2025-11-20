@@ -89,8 +89,7 @@ ml_backend/
 │   └── GCP_H100_DEPLOYMENT.md    # GCP deployment guide
 │
 ├── packages/                     # Custom architecture wheels
-│   ├── resonance_nn-*.whl
-│   └── temporal_eigenstate_networks-*.whl
+│   └── resonance_nn-*.whl
 │
 ├── scripts/                      # Helper scripts
 │   ├── generate_certs.sh         # mTLS certificates
@@ -146,7 +145,6 @@ If you want to use modules individually:
 ```bash
 pip install -r requirements.txt
 pip install packages/resonance_nn-0.1.0-py3-none-any.whl
-pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl
 ```
 
 **2. Generate Certificates**

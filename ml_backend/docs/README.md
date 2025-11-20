@@ -255,7 +255,6 @@ ml_backend/
 │   └── test_grpc.py
 │
 ├── resonance_nn-0.1.0-py3-none-any.whl          # FFT-based models
-├── temporal_eigenstate_networks-0.1.0-py3-none-any.whl
 └── README.md                        # This file
 ```
 
@@ -302,7 +301,6 @@ for chunk in loader.stream_chunks("dataset.parquet"):
 ```bash
 # Install custom architectures
 pip install resonance_nn-0.1.0-py3-none-any.whl
-pip install temporal_eigenstate_networks-0.1.0-py3-none-any.whl
 
 # Install other requirements
 pip install torch>=2.0.0 grpcio grpcio-tools

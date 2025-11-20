@@ -117,7 +117,7 @@ message CascadeRequest {
 
 message CascadeConfig {
   repeated ModelTier tiers = 1;
-  string target_architecture = 2;  // "resonance_nn" or "temporal_eigenstate"
+  string target_architecture = 2;  // "resonance_nn"
   int64 target_model_size = 3;
   int32 vocab_size = 4;
 }

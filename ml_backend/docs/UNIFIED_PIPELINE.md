@@ -378,7 +378,6 @@ orchestrator = SynthosOrchestrator(
 ```bash
 pip install -r requirements.txt
 pip install packages/resonance_nn-0.1.0-py3-none-any.whl
-pip install packages/temporal_eigenstate_networks-0.1.0-py3-none-any.whl
 ```
 
 ---

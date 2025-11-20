@@ -25,6 +25,17 @@ ml_backend/*.egg-info/
 ml_backend/dist/
 ml_backend/build/
 
+# ML artifacts (download during build)
+*.whl
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+ml_backend/packages/*.whl
+ml_backend/data/**/*.h5
+
 # Environment variables
 .env
 .env.local

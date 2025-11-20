@@ -69,18 +69,20 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # Python ML Microservices
+  # Python ML Unified Service (All ML Backends)
   # ============================================
 
-  # Validation Service (Cascade Training & Diversity Analysis)
-  validation-service:
+  # ML Backend (Validation, Collapse, Data Services)
+  ml-backend:
     build:
-      context: ./validation_service
-      dockerfile: Dockerfile
-    container_name: synthos-validation-service
+      context: ./ml_backend
+      dockerfile: Dockerfile.production
+    container_name: synthos-ml-backend
     environment:
       VALIDATION_SERVICE_PORT: 50051
-      VALIDATION_SERVICE_HOST: 0.0.0.0
+      COLLAPSE_SERVICE_PORT: 50052
+      DATA_SERVICE_PORT: 50054
+      SERVICE_HOST: 0.0.0.0
       
       # GPU Configuration
       GPU_DEVICES: "0,1,2,3"
@@ -89,11 +91,11 @@ services:
       # Paths
       MODEL_PATH: /models
       CACHE_PATH: /cache
+      SIGNATURE_DB_PATH: /data/signatures
       
       # Training defaults
       DEFAULT_BATCH_SIZE: 512
       DEFAULT_EPOCHS: 100
-      EARLY_STOPPING_PATIENCE: 10
       
       # gRPC
       GRPC_MAX_WORKERS: 10
@@ -120,84 +122,13 @@ services:
       TLS_ENABLED: "false"
     ports:
       - "50051:50051"
-    volumes:
-      - ./validation_service:/app
-      - validation_models:/models
-      - validation_cache:/cache
-    depends_on:
-      - postgres
-      - redis
-      - minio
-    networks:
-      - synthos-network
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 4
-              capabilities: [gpu]
-
-  # Collapse Service (Collapse Detection & Recommendations)
-  collapse-service:
-    build:
-      context: ./collapse_service
-      dockerfile: Dockerfile
-    container_name: synthos-collapse-service
-    environment:
-      COLLAPSE_SERVICE_PORT: 50052
-      COLLAPSE_SERVICE_HOST: 0.0.0.0
-      
-      # GPU Configuration
-      GPU_DEVICES: "0,1,2,3"
-      GPU_MEMORY_FRACTION: "0.8"
-      
-      # Paths
-      SIGNATURE_DB_PATH: /data/signatures
-      MODEL_CACHE_PATH: /cache/models
-      
-      # Detection thresholds
-      COLLAPSE_THRESHOLD: "0.7"
-      DIMENSION_THRESHOLD: "0.6"
-      
-      # Localization
-      TOP_K_PROBLEMS: 100
-      GRADIENT_SAMPLES: 1000
-      
-      # Recommendations
-      MAX_RECOMMENDATIONS: 10
-      MIN_IMPACT_THRESHOLD: "0.05"
-      
-      # gRPC
-      GRPC_MAX_WORKERS: 10
-      GRPC_MAX_MESSAGE_SIZE: 100000000
-      
-      # Database
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/synthos
-      
-      # Redis
-      REDIS_URL: redis://redis:6379/1
-      REDIS_PASSWORD: redis_password
-      
-      # MinIO
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: datasets
-      
-      # Logging
-      LOG_LEVEL: INFO
-      LOG_FORMAT: json
-      
-      # TLS (disabled for dev)
-      TLS_ENABLED: "false"
-    ports:
       - "50052:50052"
+      - "50054:50054"
     volumes:
-      - ./collapse_service:/app
-      - collapse_signatures:/data/signatures
-      - collapse_cache:/cache/models
+      - ./ml_backend:/app
+      - ml_models:/models
+      - ml_cache:/cache
+      - ml_signatures:/data/signatures
     depends_on:
       - postgres
       - redis
@@ -287,9 +218,9 @@ services:
       WORKERS: 10
       
       # ML Service addresses (gRPC)
-      VALIDATION_SERVICE_ADDR: validation-service:50051
-      COLLAPSE_SERVICE_ADDR: collapse-service:50053
-      DATA_SERVICE_ADDR: data-service:50054
+      VALIDATION_SERVICE_ADDR: ml-backend:50051
+      COLLAPSE_SERVICE_ADDR: ml-backend:50052
+      DATA_SERVICE_ADDR: ml-backend:50054
       
       # Database
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
@@ -315,11 +246,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      validation-service:
-        condition: service_started
-      collapse-service:
-        condition: service_started
-      data-service:
+      ml-backend:
         condition: service_started
     networks:
       - synthos-network
@@ -468,13 +395,11 @@ volumes:
     driver: local
   minio_data:
     driver: local
-  validation_models:
+  ml_models:
     driver: local
-  validation_cache:
+  ml_cache:
     driver: local
-  collapse_signatures:
-    driver: local
-  collapse_cache:
+  ml_signatures:
     driver: local
   prometheus_data:
     driver: local

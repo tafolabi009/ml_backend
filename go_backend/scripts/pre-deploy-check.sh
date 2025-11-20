@@ -54,7 +54,7 @@ if grep -r "gin.Context" internal/ --include="*.go" 2>/dev/null; then
     echo -e "${RED}✗${NC} Found Gin code (should be deleted)"
     ((ERRORS++))
 else
-    echo -e "${GREEN}✓${NC} No Gin code found"
+    echo -e "${GREEN}✓${NC} No Gin code found - all migrated to Fiber"
 fi
 
 # 4. Check environment variables
