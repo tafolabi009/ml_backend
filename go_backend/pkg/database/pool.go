@@ -53,9 +53,6 @@ func NewPool(ctx context.Context, dsn string, poolConfig *PoolConfig) (*pgxpool.
 	config.HealthCheckPeriod = poolConfig.HealthCheckPeriod
 	config.ConnConfig.ConnectTimeout = poolConfig.ConnectTimeout
 
-	// Enable statement cache
-	config.ConnConfig.DefaultQueryExecMode = pgxpool.QueryExecModeSimpleProtocol
-
 	// Create pool
 	log.Info("Creating database connection pool",
 		"max_conns", config.MaxConns,

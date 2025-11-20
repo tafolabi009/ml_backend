@@ -96,7 +96,7 @@ func (h *RESTHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"job_id":     job.ID,
 		"user_id":    job.UserID,
-		"job_type":   job.Type,
+		"job_type":   job.JobType,
 		"status":     job.Status,
 		"priority":   job.Priority,
 		"progress":   job.Progress,
@@ -137,7 +137,7 @@ func (h *RESTHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		jr := map[string]any{
 			"job_id":     job.ID,
 			"user_id":    job.UserID,
-			"job_type":   job.Type,
+			"job_type":   job.JobType,
 			"status":     job.Status,
 			"priority":   job.Priority,
 			"progress":   job.Progress,

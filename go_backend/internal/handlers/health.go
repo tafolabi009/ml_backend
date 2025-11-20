@@ -177,7 +177,7 @@ func (h *HealthHandler) checkValidationService(ctx context.Context) ServiceHealt
 
 	start := time.Now()
 
-	err := h.validationClient.Health(ctx)
+	err := h.validationClient.Health(ctx, "health-check")
 	latency := time.Since(start)
 
 	if err != nil {

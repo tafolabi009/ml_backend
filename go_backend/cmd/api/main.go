@@ -20,7 +20,6 @@ import (
 	"github.com/tafolabi009/backend/go_backend/pkg/config"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
 	"github.com/tafolabi009/backend/go_backend/pkg/monitoring"
-	"github.com/tafolabi009/backend/go_backend/pkg/orchestrator"
 	"github.com/tafolabi009/backend/go_backend/pkg/tracing"
 )
 
@@ -40,15 +39,13 @@ func main() {
 	}
 	defer database.Close()
 
-	// Initialize orchestrator client (replaces direct gRPC clients)
-	orchestratorClient, err := orchestrator.NewClient(cfg.OrchestratorAddr)
-	if err != nil {
-		log.Fatalf("Failed to initialize orchestrator client: %v", err)
-	}
-	defer orchestratorClient.Close()
-
-	// Store orchestrator client in handlers package
-	handlers.SetOrchestratorClient(orchestratorClient)
+	// TODO: Initialize orchestrator client when needed
+	// orchestratorClient, err := orchestrator.NewClient(cfg.OrchestratorAddr)
+	// if err != nil {
+	// 	log.Fatalf("Failed to initialize orchestrator client: %v", err)
+	// }
+	// defer orchestratorClient.Close()
+	// handlers.SetOrchestratorClient(orchestratorClient)
 
 	// Initialize Jaeger tracing (optional)
 	if os.Getenv("ENABLE_TRACING") == "true" {
@@ -56,7 +53,7 @@ func main() {
 		if jaegerEndpoint == "" {
 			jaegerEndpoint = "localhost:6831"
 		}
-		
+
 		tracer, closer, err := tracing.InitJaeger("synthos-api-gateway", jaegerEndpoint)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize Jaeger tracer: %v", err)

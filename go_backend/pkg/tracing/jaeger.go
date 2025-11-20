@@ -3,6 +3,7 @@ package tracing
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -127,6 +128,25 @@ func TraceDBQuery(c *fiber.Ctx, query string, fn func() error) error {
 // InjectSpanContext injects span context into HTTP headers
 func InjectSpanContext(span opentracing.Span, headers map[string]string) error {
 	tracer := opentracing.GlobalTracer()
-	carrier := opentracing.HTTPHeadersCarrier(headers)
-	return tracer.Inject(span.Context(), opentracing.HTTPHeaders, carrier)
+
+	// Convert map to http.Header
+	httpHeaders := make(http.Header)
+	for k, v := range headers {
+		httpHeaders.Set(k, v)
+	}
+
+	carrier := opentracing.HTTPHeadersCarrier(httpHeaders)
+	err := tracer.Inject(span.Context(), opentracing.HTTPHeaders, carrier)
+	if err != nil {
+		return err
+	}
+
+	// Copy back to original map
+	for key, values := range httpHeaders {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+
+	return nil
 }

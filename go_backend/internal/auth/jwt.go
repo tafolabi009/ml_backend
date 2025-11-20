@@ -39,6 +39,30 @@ func GenerateToken(userID, email, companyID string, expiresIn time.Duration) (st
 	return token.SignedString(jwtSecret)
 }
 
+// TokenPair represents access and refresh tokens
+type TokenPair struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// GenerateTokenPair creates both access and refresh tokens
+func GenerateTokenPair(userID, email string) (*TokenPair, error) {
+	accessToken, err := GenerateToken(userID, email, "", 15*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshToken, err := GenerateToken(userID, email, "", 7*24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TokenPair{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
 // ValidateToken validates a JWT token and returns claims
 func ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {

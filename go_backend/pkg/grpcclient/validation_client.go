@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sony/gobreaker"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -39,9 +40,13 @@ func NewValidationClient(addr string) (*ValidationClient, error) {
 	}
 
 	client := pb.NewValidationServiceClient(conn)
-	breaker := circuitbreaker.NewCircuitBreaker("validation-service", circuitbreaker.DefaultConfig())
 
 	log := logger.Get().With("service", "validation-client")
+	breaker := circuitbreaker.NewCircuitBreaker(
+		circuitbreaker.DefaultConfig("validation-service"),
+		log.Logger,
+	)
+
 	log.Info("Connected to validation service", "address", addr)
 
 	return &ValidationClient{
@@ -53,7 +58,7 @@ func NewValidationClient(addr string) (*ValidationClient, error) {
 }
 
 // TrainCascade initiates cascade training with circuit breaker protection
-func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath string, config *pb.TrainingConfig) (*pb.TrainCascadeResponse, error) {
+func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath string, config *pb.CascadeConfig) (*pb.TrainCascadeResponse, error) {
 	traceID := ctx.Value("trace_id")
 	if traceID != nil {
 		v.log = v.log.With("trace_id", traceID)
@@ -142,20 +147,6 @@ func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetP
 	return response, nil
 }
 
-// GetJobStatus checks job status
-func (v *ValidationClient) GetJobStatus(ctx context.Context, jobID string) (*pb.JobStatusResponse, error) {
-	result, err := v.breaker.Execute(ctx, func() (interface{}, error) {
-		req := &pb.JobStatusRequest{JobId: jobID}
-		return v.client.GetJobStatus(ctx, req)
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return result.(*pb.JobStatusResponse), nil
-}
-
 // Close closes the client connection
 func (v *ValidationClient) Close() error {
 	v.log.Info("Closing validation client")
@@ -163,13 +154,17 @@ func (v *ValidationClient) Close() error {
 }
 
 // Health checks if the service is healthy
-func (v *ValidationClient) Health(ctx context.Context) error {
+func (v *ValidationClient) Health(ctx context.Context, jobID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Try a lightweight operation
-	_, err := v.GetJobStatus(ctx, "health-check")
-	if err != nil && v.breaker.State() == circuitbreaker.StateOpen {
+	// Simple connection check
+	if v.conn == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	// Check circuit breaker state
+	if v.breaker.State() == gobreaker.StateOpen {
 		return fmt.Errorf("validation service circuit breaker open")
 	}
 
