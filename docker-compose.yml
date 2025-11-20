@@ -182,8 +182,9 @@ services:
       ENABLE_TRACING: "true"
     ports:
       - "8000:8000"
-    volumes:
-      - ./go_backend:/app
+    # Volume mount disabled for production container
+    # volumes:
+    #   - ./go_backend:/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,8 +241,9 @@ services:
     ports:
       - "8080:8080"   # REST API
       - "50053:50053" # gRPC (legacy)
-    volumes:
-      - ./job_orchestrator:/app
+    # Volume mount disabled for production container
+    # volumes:
+    #   - ./job_orchestrator:/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -266,7 +268,7 @@ services:
     container_name: synthos-data-service
     environment:
       ENVIRONMENT: development
-      PORT: 50054
+      PORT: 50055
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
       REDIS_URL: redis:6379
       REDIS_PASSWORD: redis_password
@@ -284,9 +286,10 @@ services:
       # Feature flags
       ENABLE_METRICS: "true"
     ports:
-      - "50054:50054"
-    volumes:
-      - ./data_service:/app
+      - "50055:50055"
+    # Volume mount disabled for production container
+    # volumes:
+    #   - ./data_service:/app
     depends_on:
       postgres:
         condition: service_healthy

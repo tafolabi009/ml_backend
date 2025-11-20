@@ -372,6 +372,68 @@ class AdvancedSignatureLibrary:
     
     # ==================== PATTERN MATCHING ====================
     
+    def find_similar_signatures(
+        self,
+        fingerprint: Dict[str, Any],
+        top_k: int = 10,
+        similarity_threshold: float = 0.7
+    ) -> List[Dict[str, Any]]:
+        """
+        Simplified interface for finding similar signatures (sync).
+        
+        Args:
+            fingerprint: Dictionary with metrics like entropy, gini, cluster_count
+            top_k: Number of results to return
+            similarity_threshold: Minimum similarity score
+        
+        Returns:
+            List of matching signatures
+        """
+        # Extract dimension scores from fingerprint
+        dimension_scores = {
+            'entropy': fingerprint.get('entropy', 0.0),
+            'gini': fingerprint.get('gini', 0.0),
+            'cluster_count': fingerprint.get('cluster_count', 0)
+        }
+        
+        # Create minimal data statistics
+        data_statistics = {
+            'row_count': 1000,
+            'column_count': 10,
+            'missing_percentage': 0.0
+        }
+        
+        # Call async method synchronously
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        matches, _ = loop.run_until_complete(
+            self.find_similar_patterns(
+                dimension_scores=dimension_scores,
+                data_statistics=data_statistics,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                explain=False
+            )
+        )
+        
+        # Convert to simple dict format
+        results = []
+        for match in matches:
+            results.append({
+                'id': match.signature_id,
+                'collapse_type': match.collapse_type,
+                'similarity': match.similarity,
+                'outcome': match.severity,
+                'confidence': match.confidence
+            })
+        
+        return results
+    
     async def find_similar_patterns(
         self,
         dimension_scores: Dict[str, float],

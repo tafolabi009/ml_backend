@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -113,15 +114,13 @@ func (p *GCSProvider) GetSize(ctx context.Context, key string) (int64, error) {
 
 // GenerateSignedURL generates a signed URL for uploads
 func (p *GCSProvider) GenerateSignedURL(ctx context.Context, key string, method string, expirationMinutes int) (string, error) {
-	obj := p.client.Bucket(p.bucket).Object(key)
-	
 	opts := &storage.SignedURLOptions{
 		Method:  method,
 		Expires: time.Now().Add(time.Duration(expirationMinutes) * time.Minute),
 		Scheme:  storage.SigningSchemeV4,
 	}
 
-	url, err := obj.SignedURL(opts)
+	url, err := p.client.Bucket(p.bucket).SignedURL(key, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate signed URL: %w", err)
 	}
@@ -154,22 +153,24 @@ func (p *GCSProvider) List(ctx context.Context, prefix string, maxResults int) (
 	query := &storage.Query{
 		Prefix: prefix,
 	}
-	if maxResults > 0 {
-		query.MaxResults = maxResults
-	}
 
 	it := p.client.Bucket(p.bucket).Objects(ctx, query)
 	
 	keys := []string{}
+	count := 0
 	for {
 		attrs, err := it.Next()
-		if err == storage.Done {
+		if err == iterator.Done {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate GCS objects: %w", err)
 		}
 		keys = append(keys, attrs.Name)
+		count++
+		if maxResults > 0 && count >= maxResults {
+			break
+		}
 	}
 
 	return keys, nil
