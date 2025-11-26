@@ -190,10 +190,22 @@ class DiversityAnalyzer:
                 }
         else:  # CSV, JSON, etc.
             # Use sampling for quick metadata
-            df_sample = pd.read_csv(data_path, nrows=1000) if data_format == 'csv' else pd.read_json(data_path, lines=True, nrows=1000)
+            try:
+                df_sample = pd.read_csv(data_path, nrows=1000) if data_format == 'csv' else pd.read_json(data_path, lines=True, nrows=1000)
+            except pd.errors.EmptyDataError:
+                raise ValueError("Dataset is empty")
+                
+            if len(df_sample) == 0:
+                raise ValueError("Dataset is empty (header only)")
+                
             file_size_gb = Path(data_path).stat().st_size / (1024**3)
             # Estimate row count
-            estimated_rows = int((file_size_gb * 1024**3) / (df_sample.memory_usage(deep=True).sum() / len(df_sample)))
+            avg_row_size = df_sample.memory_usage(deep=True).sum() / len(df_sample)
+            if avg_row_size == 0:
+                estimated_rows = 0
+            else:
+                estimated_rows = int((file_size_gb * 1024**3) / avg_row_size)
+                
             return {
                 'rows': estimated_rows,
                 'columns': len(df_sample.columns),
@@ -363,10 +375,11 @@ class DiversityAnalyzer:
             return 50.0  # Neutral score
         
         # Coefficient of variation
-        cv = (std / abs(mean)) if mean != 0 else 0
+        cv = abs(std / mean) if mean != 0 else 0
         
         # Normalize to 0-100 (CV > 1 = high diversity)
-        score = min(100, cv * 50)
+        # Use explicit float conversion and min to avoid numpy issues
+        score = float(min(100.0, cv * 50.0))
         return score
     
     def _compute_uniqueness_score(self, col_stats: Dict[str, float]) -> float:
@@ -378,7 +391,7 @@ class DiversityAnalyzer:
         uniqueness_ratio = unique / count if count > 0 else 0
         
         # Normalize to 0-100
-        score = uniqueness_ratio * 100
+        score = float(min(100.0, uniqueness_ratio * 100.0))
         return score
     
     def _compute_balance_score(self, col_stats: Dict[str, float]) -> float:
@@ -398,10 +411,10 @@ class DiversityAnalyzer:
         if iqr == 0:
             return 50.0
         
-        symmetry = 1 - abs(lower_spread - upper_spread) / iqr
+        symmetry = 1.0 - abs(lower_spread - upper_spread) / iqr
         
         # Normalize to 0-100
-        score = symmetry * 100
+        score = float(max(0.0, min(100.0, symmetry * 100.0)))
         return score
     
     # ==================== SKEWNESS & OUTLIERS ====================
@@ -509,7 +522,7 @@ class DiversityAnalyzer:
             std = col_stats.get('std', 0)
             mean = col_stats.get('mean', 0)
             if mean != 0:
-                coverage_scores.append(min(100, (std / abs(mean)) * 50))
+                coverage_scores.append(float(min(100.0, (std / abs(mean)) * 50.0)))
         
         coverage_score = np.mean(coverage_scores) if coverage_scores else 50.0
         

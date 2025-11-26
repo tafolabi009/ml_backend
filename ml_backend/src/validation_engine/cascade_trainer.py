@@ -438,8 +438,9 @@ class CascadeTrainer:
             # Validate in batches
             batch_size = 128
             for i in range(0, len(val_data) - 1, batch_size):
-                inputs = val_data[i:i+batch_size-1].to(device)
-                targets = val_data[i+1:i+batch_size].to(device)
+                end_idx = min(i + batch_size, len(val_data) - 1)
+                inputs = val_data[i:end_idx].to(device)
+                targets = val_data[i+1:end_idx+1].to(device)
                 
                 outputs = model(inputs)
                 loss = criterion(

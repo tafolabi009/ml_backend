@@ -102,6 +102,21 @@ class CollapseDetector:
         """
         logger.info("Starting multi-dimensional collapse detection...")
         
+        # Handle empty data
+        if synthetic_data.size == 0 or original_data.size == 0:
+            raise ValueError("Input data cannot be empty")
+            
+        # Handle dimension mismatch (trim to common dimensions)
+        min_dims = min(synthetic_data.shape[1], original_data.shape[1])
+        if synthetic_data.shape[1] != original_data.shape[1]:
+            logger.warning(f"Dimension mismatch: {synthetic_data.shape[1]} vs {original_data.shape[1]}. Trimming to {min_dims}.")
+            synthetic_data = synthetic_data[:, :min_dims]
+            original_data = original_data[:, :min_dims]
+            
+        # Handle NaNs (replace with 0)
+        synthetic_data = np.nan_to_num(synthetic_data)
+        original_data = np.nan_to_num(original_data)
+        
         dimensions = {}
         warnings = []
         
@@ -228,8 +243,14 @@ class CollapseDetector:
         # 4. Histogram intersection
         hist_intersections = []
         for i in range(min(synthetic.shape[1], 50)):
-            hist_synth, bins = np.histogram(synthetic[:, i], bins=50, density=True)
-            hist_orig, _ = np.histogram(original[:, i], bins=bins, density=True)
+            # Use density=False and normalize to sum to 1 (PMF)
+            hist_synth, bins = np.histogram(synthetic[:, i], bins=50, density=False)
+            hist_orig, _ = np.histogram(original[:, i], bins=bins, density=False)
+            
+            # Normalize to sum to 1
+            hist_synth = hist_synth / (hist_synth.sum() + 1e-10)
+            hist_orig = hist_orig / (hist_orig.sum() + 1e-10)
+            
             intersection = np.minimum(hist_synth, hist_orig).sum()
             hist_intersections.append(intersection)
         metrics['histogram_intersection'] = np.mean(hist_intersections) * 100
@@ -238,8 +259,8 @@ class CollapseDetector:
         kl_divergences = []
         for i in range(min(synthetic.shape[1], 50)):
             # Create probability distributions from histograms
-            hist_synth, bins = np.histogram(synthetic[:, i], bins=50, density=True)
-            hist_orig, _ = np.histogram(original[:, i], bins=bins, density=True)
+            hist_synth, bins = np.histogram(synthetic[:, i], bins=50, density=False)
+            hist_orig, _ = np.histogram(original[:, i], bins=bins, density=False)
             
             # Normalize to probabilities
             hist_synth = hist_synth / (hist_synth.sum() + 1e-10)
@@ -324,7 +345,14 @@ class CollapseDetector:
         orig_corr_flat = orig_corr[triu_indices]
         
         if len(synth_corr_flat) > 1:
-            corr_of_corr = np.corrcoef(synth_corr_flat, orig_corr_flat)[0, 1]
+            # Handle constant arrays in corrcoef (returns NaN)
+            if np.std(synth_corr_flat) < 1e-9 or np.std(orig_corr_flat) < 1e-9:
+                corr_of_corr = 0.0
+            else:
+                corr_of_corr = np.corrcoef(synth_corr_flat, orig_corr_flat)[0, 1]
+                if np.isnan(corr_of_corr):
+                    corr_of_corr = 0.0
+            
             corr_of_corr_score = (corr_of_corr + 1) / 2 * 100  # Normalize to 0-100
         else:
             corr_of_corr_score = 100.0
@@ -789,6 +817,9 @@ class CollapseDetector:
             metrics['anderson_darling_score'] * 0.35 +
             metrics['mann_whitney_pvalue'] * 0.30
         )
+        
+        # Clamp score to 0-100 range
+        score = max(0.0, min(100.0, score))
         
         passed = score >= self.config.statistical_consistency_threshold
         severity = self._determine_severity(score, self.config.statistical_consistency_threshold)

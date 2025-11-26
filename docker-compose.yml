@@ -10,9 +10,9 @@ services:
     image: postgres:15-alpine
     container_name: synthos-postgres
     environment:
-      POSTGRES_DB: synthos
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-synthos}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: "-E UTF8"
     ports:
       - "5432:5432"
@@ -32,7 +32,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: synthos-redis
-    command: redis-server --appendonly yes --requirepass redis_password
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
     volumes:
@@ -52,8 +52,8 @@ services:
     container_name: synthos-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
       - "9000:9000"  # S3 API
       - "9001:9001"  # Console
@@ -102,16 +102,16 @@ services:
       GRPC_MAX_MESSAGE_SIZE: 100000000
       
       # Database
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/synthos
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synthos}
       
       # Redis
       REDIS_URL: redis://redis:6379/0
-      REDIS_PASSWORD: redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       
       # MinIO
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: datasets
       
       # Logging
@@ -158,17 +158,17 @@ services:
     environment:
       ENVIRONMENT: development
       PORT: 8000
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synthos}?sslmode=disable
       REDIS_URL: redis:6379
-      REDIS_PASSWORD: redis_password
-      JWT_SECRET: dev-secret-change-in-production-use-long-random-string
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
       
       # AWS S3 Configuration (using MinIO)
       AWS_REGION: us-east-1
       S3_BUCKET: synthos-datasets
       S3_ENDPOINT: http://minio:9000
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       
       # Job Orchestrator (REST API)
       ORCHESTRATOR_ADDR: job-orchestrator:8080
@@ -225,9 +225,9 @@ services:
       DATA_SERVICE_ADDR: ml-backend:50054
       
       # Database
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synthos}?sslmode=disable
       REDIS_URL: redis:6379
-      REDIS_PASSWORD: redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       
       # TLS Configuration (disabled for development)
       TLS_ENABLED: "false"
@@ -269,16 +269,16 @@ services:
     environment:
       ENVIRONMENT: development
       PORT: 50055
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/synthos?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synthos}?sslmode=disable
       REDIS_URL: redis:6379
-      REDIS_PASSWORD: redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       
       # S3 Configuration
       AWS_REGION: us-east-1
       S3_BUCKET: synthos-datasets
       S3_ENDPOINT: http://minio:9000
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       
       # TLS Configuration
       TLS_ENABLED: "false"
@@ -332,7 +332,7 @@ services:
     image: grafana/grafana:latest
     container_name: synthos-grafana
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       - "3000:3000"
@@ -378,8 +378,8 @@ services:
     environment:
       ORCHESTRATOR_ADDR: http://job-orchestrator:8080
       ADMIN_PORT: 3001
-      ADMIN_USER: admin
-      ADMIN_PASSWORD: admin
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     ports:
       - "3001:3001"
     volumes:
