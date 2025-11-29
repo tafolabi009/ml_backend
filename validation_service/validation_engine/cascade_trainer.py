@@ -24,16 +24,29 @@ import asyncio
 from datetime import datetime
 
 # Import our custom architectures (Resonance NN from NEURON_NEW)
-from src.model_architectures import (
-    create_resonance_model,
-    create_long_context_model,
-    create_classifier,
-    get_model_info,
-    ResonanceNet,
-    ResonanceLanguageModel,
-    ResonanceClassifier,
-    MODEL_CONFIGS
-)
+# Try local model_architectures first, then fall back to src
+try:
+    from model_architectures import (
+        create_resonance_model,
+        create_long_context_model,
+        create_classifier,
+        get_model_info,
+        ResonanceNet,
+        ResonanceLanguageModel,
+        ResonanceClassifier,
+        MODEL_CONFIGS
+    )
+except ImportError:
+    from src.model_architectures import (
+        create_resonance_model,
+        create_long_context_model,
+        create_classifier,
+        get_model_info,
+        ResonanceNet,
+        ResonanceLanguageModel,
+        ResonanceClassifier,
+        MODEL_CONFIGS
+    )
 
 logger = logging.getLogger(__name__)
 

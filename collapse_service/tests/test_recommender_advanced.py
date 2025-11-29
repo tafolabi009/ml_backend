@@ -339,11 +339,11 @@ def test_engine_gpu_fallback_to_cpu():
         assert engine.device == torch.device('cpu')
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_engine_gpu_enabled_when_available():
     """Engine should use GPU when available and requested."""
-    with patch('torch.cuda.is_available', return_value=True):
-        engine = ra.AdvancedRecommendationEngine(use_gpu=True)
-        assert engine.device == torch.device('cuda')
+    engine = ra.AdvancedRecommendationEngine(use_gpu=True)
+    assert engine.device == torch.device('cuda')
 
 
 # ============================ SUMMARY GENERATION ============================
