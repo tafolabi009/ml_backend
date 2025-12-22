@@ -1,0 +1,292 @@
+{
+  "summary": {
+    "started_at": "2025-12-22T17:45:06.662380",
+    "completed_at": "2025-12-22T17:46:28.975462",
+    "duration_seconds": 82.31,
+    "total_tests": 15,
+    "passed": 14,
+    "failed": 0,
+    "warnings": 1,
+    "skipped": 0,
+    "success_rate": "93.3%"
+  },
+  "infrastructure": {
+    "api_gateway": "http://localhost:8000",
+    "job_orchestrator": "http://localhost:8080",
+    "minio": "http://localhost:9000"
+  },
+  "data_generated": {
+    "target_size_mb": 50,
+    "files_uploaded": 3,
+    "datasets": [
+      {
+        "id": "2887b354-7b65-4ba2-b67b-359180f93718",
+        "filename": "tabular_training.csv",
+        "size": 132169573,
+        "type": "csv"
+      },
+      {
+        "id": "f1e1be25-7641-4ea2-8047-3570d62eb277",
+        "filename": "timeseries_sensors.csv",
+        "size": 15729213,
+        "type": "csv"
+      },
+      {
+        "id": "d7de5718-d166-494b-b3cc-9ab5b3b57d06",
+        "filename": "embeddings.bin",
+        "size": 7864200,
+        "type": "binary"
+      }
+    ]
+  },
+  "jobs_executed": {
+    "total": 3,
+    "jobs": [
+      {
+        "id": "5c7bd12c-cbed-48c8-899a-70b7eadb13d7",
+        "type": "validation",
+        "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+        "status": "queued"
+      },
+      {
+        "id": "509a8011-5560-43f6-aaf7-f4917e59efd3",
+        "type": "collapse_detection",
+        "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+        "status": "queued"
+      },
+      {
+        "id": "7b9b56d3-89a4-485f-9833-357808fbc613",
+        "type": "diversity_analysis",
+        "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+        "status": "queued"
+      }
+    ]
+  },
+  "test_results": [
+    {
+      "name": "API Gateway Health",
+      "status": "TestStatus.PASS",
+      "duration_ms": 36.91577911376953,
+      "message": "API Gateway v1.0.0 healthy",
+      "details": {
+        "service": "synthos-api-gateway",
+        "status": "healthy",
+        "time": 1766421906,
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "Job Orchestrator Health",
+      "status": "TestStatus.PASS",
+      "duration_ms": 10.407447814941406,
+      "message": "Job Orchestrator healthy",
+      "details": {
+        "service": "job-orchestrator",
+        "status": "healthy",
+        "time": 1766421906
+      }
+    },
+    {
+      "name": "MinIO Storage Health",
+      "status": "TestStatus.PASS",
+      "duration_ms": 9.441375732421875,
+      "message": "MinIO healthy",
+      "details": {
+        "status_code": 200
+      }
+    },
+    {
+      "name": "User Registration",
+      "status": "TestStatus.PASS",
+      "duration_ms": 100.28672218322754,
+      "message": "User registered: e2e_test_1766421906@synthos.ai",
+      "details": {
+        "company_id": "cce394f2-4471-4a05-9010-bf8e90954a82",
+        "created_at": "2025-12-22T16:45:06Z",
+        "email": "e2e_test_1766421906@synthos.ai",
+        "user_id": "d73b2edb-1ec2-4d52-b998-59624ef59fcc"
+      }
+    },
+    {
+      "name": "User Login",
+      "status": "TestStatus.PASS",
+      "duration_ms": 134.32025909423828,
+      "message": "Login successful, token expires in 900s",
+      "details": {
+        "user_id": "d73b2edb-1ec2-4d52-b998-59624ef59fcc"
+      }
+    },
+    {
+      "name": "Generate Synthetic Data",
+      "status": "TestStatus.PASS",
+      "duration_ms": 64540.63820838928,
+      "message": "Generated 149.73MB across 5 files",
+      "details": {
+        "total_rows": 222600,
+        "total_bytes": 157006040,
+        "schemas_generated": [
+          "tabular",
+          "timeseries",
+          "embeddings",
+          "adversarial"
+        ],
+        "corruption_rate": 0.007317303644161265,
+        "null_rate": 0.012560718191297272
+      }
+    },
+    {
+      "name": "Upload Tabular Dataset",
+      "status": "TestStatus.PASS",
+      "duration_ms": 4706.795930862427,
+      "message": "Uploaded tabular_training.csv (129071.8KB) as 2887b354-7b65-4ba2-b67b-359180f93718",
+      "details": {
+        "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+        "size": 132169573
+      }
+    },
+    {
+      "name": "Upload Time-Series Dataset",
+      "status": "TestStatus.PASS",
+      "duration_ms": 168.77174377441406,
+      "message": "Uploaded timeseries_sensors.csv (15360.6KB) as f1e1be25-7641-4ea2-8047-3570d62eb277",
+      "details": {
+        "dataset_id": "f1e1be25-7641-4ea2-8047-3570d62eb277",
+        "size": 15729213
+      }
+    },
+    {
+      "name": "Upload Embeddings Dataset",
+      "status": "TestStatus.PASS",
+      "duration_ms": 134.53364372253418,
+      "message": "Uploaded embeddings.bin (7679.9KB) as d7de5718-d166-494b-b3cc-9ab5b3b57d06",
+      "details": {
+        "dataset_id": "d7de5718-d166-494b-b3cc-9ab5b3b57d06",
+        "size": 7864200
+      }
+    },
+    {
+      "name": "Submit Validation Job",
+      "status": "TestStatus.PASS",
+      "duration_ms": 30.386924743652344,
+      "message": "Validation job created: 5c7bd12c-cbed-48c8-899a-70b7eadb13d7, status: queued, queue position: 1",
+      "details": {
+        "created_at": 1766421976,
+        "estimated_start": 1766422276,
+        "job_id": "5c7bd12c-cbed-48c8-899a-70b7eadb13d7",
+        "queue_position": 1,
+        "status": "queued"
+      }
+    },
+    {
+      "name": "Submit Collapse Detection Job",
+      "status": "TestStatus.PASS",
+      "duration_ms": 7.54237174987793,
+      "message": "Collapse detection job created: 509a8011-5560-43f6-aaf7-f4917e59efd3, status: queued",
+      "details": {
+        "created_at": 1766421976,
+        "estimated_start": 1766422576,
+        "job_id": "509a8011-5560-43f6-aaf7-f4917e59efd3",
+        "queue_position": 2,
+        "status": "queued"
+      }
+    },
+    {
+      "name": "Submit Diversity Analysis Job",
+      "status": "TestStatus.PASS",
+      "duration_ms": 8.870601654052734,
+      "message": "Diversity analysis job created: 7b9b56d3-89a4-485f-9833-357808fbc613, status: queued",
+      "details": {
+        "created_at": 1766421976,
+        "estimated_start": 1766422876,
+        "job_id": "7b9b56d3-89a4-485f-9833-357808fbc613",
+        "queue_position": 3,
+        "status": "queued"
+      }
+    },
+    {
+      "name": "Job Processing Wait",
+      "status": "TestStatus.WARN",
+      "duration_ms": 12386.518955230713,
+      "message": "Processed: 0, Failed: 3, Pending: 0",
+      "details": {
+        "processed": [],
+        "failed": [
+          {
+            "id": "5c7bd12c-cbed-48c8-899a-70b7eadb13d7",
+            "type": "validation",
+            "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+            "status": "queued",
+            "error": "validation service error: rpc error: code = Unimplemented desc = Method not found!"
+          },
+          {
+            "id": "509a8011-5560-43f6-aaf7-f4917e59efd3",
+            "type": "collapse_detection",
+            "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+            "status": "queued",
+            "error": "collapse service error: rpc error: code = Unimplemented desc = Method not found!"
+          },
+          {
+            "id": "7b9b56d3-89a4-485f-9833-357808fbc613",
+            "type": "diversity_analysis",
+            "dataset_id": "2887b354-7b65-4ba2-b67b-359180f93718",
+            "status": "queued",
+            "error": "diversity analysis error: rpc error: code = Unimplemented desc = Method not found!"
+          }
+        ],
+        "pending": []
+      }
+    },
+    {
+      "name": "Verify Datasets in DB",
+      "status": "TestStatus.PASS",
+      "duration_ms": 11.831283569335938,
+      "message": "Found 3/3 datasets in DB",
+      "details": {
+        "total_datasets": 3,
+        "our_datasets": 3
+      }
+    },
+    {
+      "name": "Verify Job Statuses",
+      "status": "TestStatus.PASS",
+      "duration_ms": 16.88098907470703,
+      "message": "Jobs - Completed: 0, Failed: 3, Other: 0",
+      "details": {
+        "statuses": {
+          "completed": 0,
+          "failed": 3,
+          "queued": 0,
+          "processing": 0
+        },
+        "details": [
+          {
+            "job_id": "5c7bd12c-cbed-48c8-899a-70b7eadb13d7",
+            "type": "validation",
+            "status": "failed",
+            "error": "validation service error: rpc error: code = Unimplemented desc = Method not found!"
+          },
+          {
+            "job_id": "509a8011-5560-43f6-aaf7-f4917e59efd3",
+            "type": "collapse_detection",
+            "status": "failed",
+            "error": "collapse service error: rpc error: code = Unimplemented desc = Method not found!"
+          },
+          {
+            "job_id": "7b9b56d3-89a4-485f-9833-357808fbc613",
+            "type": "diversity_analysis",
+            "status": "failed",
+            "error": "diversity analysis error: rpc error: code = Unimplemented desc = Method not found!"
+          }
+        ]
+      }
+    }
+  ],
+  "failure_analysis": {
+    "functional_failures": [],
+    "data_quality_failures": [],
+    "resource_failures": []
+  },
+  "recommendations": [
+    "All systems operating normally"
+  ]
+}

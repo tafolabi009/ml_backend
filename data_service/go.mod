@@ -7,6 +7,7 @@ toolchain go1.24.5
 replace github.com/tafolabi009/backend/proto => ../proto/gen/go
 
 require (
+	github.com/lib/pq v1.10.9
 	github.com/tafolabi009/backend/proto v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.76.0
 )

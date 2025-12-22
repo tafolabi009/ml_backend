@@ -38,11 +38,11 @@ func RegisterFiber(c *fiber.Ctx) error {
 
 	// Create user
 	user := models.User{
-		ID:               "usr_" + uuid.New().String()[:8],
+		ID:               uuid.New().String(),
 		Email:            req.Email,
 		PasswordHash:     passwordHash,
 		FullName:         req.FullName,
-		CompanyID:        "cmp_" + uuid.New().String()[:8],
+		CompanyID:        uuid.New().String(),
 		CompanyName:      req.CompanyName,
 		SubscriptionTier: "free",
 		CreatedAt:        time.Now().UTC(),

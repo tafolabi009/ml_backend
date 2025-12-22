@@ -44,10 +44,9 @@ type ResourceManager struct {
 func NewResourceManager(workers int) *ResourceManager {
 	numCPU := runtime.NumCPU()
 
-	// Get system memory (simplified - in production use actual system info)
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	totalMemoryMB := int(m.Sys / 1024 / 1024)
+	// Use a reasonable default memory limit (4GB per worker)
+	// In production, this should read from cgroup limits or environment variables
+	totalMemoryMB := workers * 4000 // 4GB per worker, allowing concurrent jobs
 
 	// Detect GPUs (simplified - in production use nvidia-smi or similar)
 	totalGPUs := detectGPUs()

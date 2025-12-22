@@ -19,6 +19,7 @@ import (
 	"github.com/tafolabi009/backend/go_backend/internal/middleware"
 	"github.com/tafolabi009/backend/go_backend/pkg/config"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
+	"github.com/tafolabi009/backend/go_backend/pkg/grpcclient"
 	"github.com/tafolabi009/backend/go_backend/pkg/monitoring"
 	"github.com/tafolabi009/backend/go_backend/pkg/tracing"
 )
@@ -39,13 +40,19 @@ func main() {
 	}
 	defer database.Close()
 
-	// TODO: Initialize orchestrator client when needed
-	// orchestratorClient, err := orchestrator.NewClient(cfg.OrchestratorAddr)
-	// if err != nil {
-	// 	log.Fatalf("Failed to initialize orchestrator client: %v", err)
-	// }
-	// defer orchestratorClient.Close()
-	// handlers.SetOrchestratorClient(orchestratorClient)
+	// Initialize gRPC clients for ML services
+	grpcClients, err := grpcclient.NewClients(
+		cfg.ValidationServiceAddr,
+		cfg.CollapseServiceAddr,
+		cfg.DataServiceAddr,
+	)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize gRPC clients: %v (some features may be unavailable)", err)
+	} else {
+		defer grpcClients.Close()
+		handlers.SetGRPCClients(grpcClients)
+		log.Println("gRPC clients initialized successfully")
+	}
 
 	// Initialize Jaeger tracing (optional)
 	if os.Getenv("ENABLE_TRACING") == "true" {

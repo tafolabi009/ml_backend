@@ -296,8 +296,8 @@ func (s *OrchestratorService) Stop() {
 func (s *OrchestratorService) executeValidationJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing validation job %s", job.ID)
 
-	// Allocate resources
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 8000, 1)
+	// Allocate resources (1GB memory, 0 GPUs for non-GPU mode)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 1024, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}
@@ -344,8 +344,8 @@ func (s *OrchestratorService) executeValidationJob(ctx context.Context, job *Job
 func (s *OrchestratorService) executeCollapseJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing collapse detection job %s", job.ID)
 
-	// Allocate resources
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 12000, 1)
+	// Allocate resources (2GB memory, 0 GPUs for non-GPU mode)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 2048, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}
@@ -394,8 +394,8 @@ func (s *OrchestratorService) executeCollapseJob(ctx context.Context, job *Job) 
 func (s *OrchestratorService) executeDataProcessingJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing data processing job %s", job.ID)
 
-	// Allocate resources
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 4000, 0)
+	// Allocate resources (1GB memory for data processing)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 1024, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}
@@ -435,7 +435,7 @@ func (s *OrchestratorService) executeDataProcessingJob(ctx context.Context, job 
 func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing diversity analysis job %s", job.ID)
 
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 8000, 1)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 1024, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}
@@ -476,7 +476,7 @@ func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, j
 func (s *OrchestratorService) executeCollapseLocalizationJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing collapse localization job %s", job.ID)
 
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 10000, 1)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 1536, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}
@@ -511,7 +511,7 @@ func (s *OrchestratorService) executeCollapseLocalizationJob(ctx context.Context
 func (s *OrchestratorService) executeRecommendationsJob(ctx context.Context, job *Job) (map[string]string, error) {
 	log.Printf("Executing recommendations job %s", job.ID)
 
-	allocated := s.resourceManager.AllocateResources(job.ID, 1, 4000, 0)
+	allocated := s.resourceManager.AllocateResources(job.ID, 1, 512, 0)
 	if !allocated {
 		return nil, fmt.Errorf("failed to allocate resources")
 	}

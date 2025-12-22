@@ -165,7 +165,7 @@ services:
       
       # AWS S3 Configuration (using MinIO)
       AWS_REGION: us-east-1
-      S3_BUCKET: synthos-datasets
+      S3_BUCKET: ${S3_BUCKET:-synthos-storage}
       S3_ENDPOINT: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}

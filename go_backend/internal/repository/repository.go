@@ -134,9 +134,9 @@ func NewDatasetRepository(db *pgxpool.Pool) *DatasetRepository {
 // Create creates a new dataset
 func (r *DatasetRepository) Create(ctx context.Context, dataset *models.Dataset) error {
 	query := `
-		INSERT INTO datasets (id, user_id, filename, file_size, file_type, status, s3_path, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING uploaded_at
+		INSERT INTO datasets (id, user_id, filename, file_size, file_type, status, s3_path)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING created_at
 	`
 
 	err := r.db.QueryRow(ctx, query,
@@ -147,8 +147,7 @@ func (r *DatasetRepository) Create(ctx context.Context, dataset *models.Dataset)
 		dataset.FileType,
 		dataset.Status,
 		dataset.S3Path,
-		dataset.Description,
-	).Scan(&dataset.UploadedAt)
+	).Scan(&dataset.CreatedAt)
 
 	if err != nil {
 		return fmt.Errorf("failed to create dataset: %w", err)
@@ -161,7 +160,7 @@ func (r *DatasetRepository) Create(ctx context.Context, dataset *models.Dataset)
 func (r *DatasetRepository) GetByID(ctx context.Context, datasetID string) (*models.Dataset, error) {
 	query := `
 		SELECT id, user_id, filename, file_size, file_type, status, s3_path,
-		       row_count, column_count, description, uploaded_at, processed_at
+		       row_count, column_count, created_at, updated_at
 		FROM datasets
 		WHERE id = $1
 	`
@@ -177,9 +176,8 @@ func (r *DatasetRepository) GetByID(ctx context.Context, datasetID string) (*mod
 		&dataset.S3Path,
 		&dataset.RowCount,
 		&dataset.ColumnCount,
-		&dataset.Description,
-		&dataset.UploadedAt,
-		&dataset.ProcessedAt,
+		&dataset.CreatedAt,
+		&dataset.UpdatedAt,
 	)
 
 	if err != nil {
@@ -203,10 +201,10 @@ func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageS
 	offset := (page - 1) * pageSize
 	query := `
 		SELECT id, user_id, filename, file_size, file_type, status, s3_path,
-		       row_count, column_count, description, uploaded_at, processed_at
+		       row_count, column_count, created_at, updated_at
 		FROM datasets
 		WHERE user_id = $1
-		ORDER BY uploaded_at DESC
+		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
@@ -229,9 +227,8 @@ func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageS
 			&dataset.S3Path,
 			&dataset.RowCount,
 			&dataset.ColumnCount,
-			&dataset.Description,
-			&dataset.UploadedAt,
-			&dataset.ProcessedAt,
+			&dataset.CreatedAt,
+			&dataset.UpdatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan dataset: %w", err)
@@ -246,7 +243,7 @@ func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageS
 func (r *DatasetRepository) Update(ctx context.Context, dataset *models.Dataset) error {
 	query := `
 		UPDATE datasets
-		SET status = $2, row_count = $3, column_count = $4, processed_at = $5
+		SET status = $2, row_count = $3, column_count = $4, updated_at = NOW()
 		WHERE id = $1
 	`
 
@@ -255,7 +252,6 @@ func (r *DatasetRepository) Update(ctx context.Context, dataset *models.Dataset)
 		dataset.Status,
 		dataset.RowCount,
 		dataset.ColumnCount,
-		dataset.ProcessedAt,
 	)
 
 	if err != nil {

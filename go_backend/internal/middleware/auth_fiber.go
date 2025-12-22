@@ -52,10 +52,7 @@ func AuthRequiredFiber() fiber.Handler {
 	}
 }
 
-// RateLimitFiber is Fiber middleware for rate limiting
+// RateLimitFiber is an alias for the RateLimit middleware for backward compatibility
 func RateLimitFiber() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// TODO: Implement rate limiting logic
-		return c.Next()
-	}
+	return RateLimit()
 }

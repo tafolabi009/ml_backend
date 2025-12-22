@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"time"
 
@@ -29,8 +30,8 @@ func InitiateUploadFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Generate dataset ID
-	datasetID := "ds_" + uuid.New().String()[:8]
+	// Generate dataset ID (proper UUID for PostgreSQL)
+	datasetID := uuid.New().String()
 
 	// Generate S3 key path
 	s3Key := fmt.Sprintf("%s/%s/%s", userID, datasetID, req.Filename)
@@ -39,10 +40,11 @@ func InitiateUploadFiber(c *fiber.Ctx) error {
 	defer cancel()
 
 	s3Config := storage.S3Config{
-		Region:          "us-east-1",
-		Bucket:          "synthos-uploads",
-		AccessKeyID:     "",
-		SecretAccessKey: "",
+		Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
+		Bucket:          getEnvOrDefault("S3_BUCKET", "synthos-storage"),
+		AccessKeyID:     getEnvOrDefault("AWS_ACCESS_KEY_ID", "minioadmin"),
+		SecretAccessKey: getEnvOrDefault("AWS_SECRET_ACCESS_KEY", "minioadmin123"),
+		Endpoint:        getEnvOrDefault("S3_ENDPOINT", "http://minio:9000"),
 	}
 
 	s3Client, err := storage.NewS3Client(ctx, s3Config)
@@ -70,15 +72,15 @@ func InitiateUploadFiber(c *fiber.Ctx) error {
 
 	// Save dataset metadata to database
 	dataset := models.Dataset{
-		ID:          datasetID,
-		UserID:      userID,
-		Filename:    req.Filename,
-		FileSize:    req.FileSize,
-		FileType:    req.FileType,
-		Status:      "uploading",
-		S3Path:      s3Key,
-		Description: req.Description,
-		UploadedAt:  time.Now().UTC(),
+		ID:        datasetID,
+		UserID:    userID,
+		Filename:  req.Filename,
+		FileSize:  req.FileSize,
+		FileType:  req.FileType,
+		Status:    "uploading",
+		S3Path:    s3Key,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 
 	datasetRepo := repository.NewDatasetRepository(database.GetDB())
@@ -144,7 +146,7 @@ func CompleteUploadFiber(c *fiber.Ctx) error {
 
 	// Update dataset status to "processing"
 	dataset.Status = "processing"
-	dataset.ProcessedAt = &[]time.Time{time.Now().UTC()}[0]
+	dataset.UpdatedAt = time.Now().UTC()
 
 	if err := datasetRepo.Update(ctx, dataset); err != nil {
 		log.Printf("Failed to update dataset status: %v", err)
@@ -289,10 +291,11 @@ func DeleteDatasetFiber(c *fiber.Ctx) error {
 	// Delete from S3 if S3 path exists
 	if dataset.S3Path != "" {
 		s3Config := storage.S3Config{
-			Region:          "us-east-1",
-			Bucket:          "synthos-uploads",
-			AccessKeyID:     "",
-			SecretAccessKey: "",
+			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
+			Bucket:          getEnvOrDefault("S3_BUCKET", "synthos-storage"),
+			AccessKeyID:     getEnvOrDefault("AWS_ACCESS_KEY_ID", "minioadmin"),
+			SecretAccessKey: getEnvOrDefault("AWS_SECRET_ACCESS_KEY", "minioadmin123"),
+			Endpoint:        getEnvOrDefault("S3_ENDPOINT", "http://minio:9000"),
 		}
 
 		s3Client, err := storage.NewS3Client(ctx, s3Config)
@@ -320,4 +323,12 @@ func DeleteDatasetFiber(c *fiber.Ctx) error {
 		"status":     "deleted",
 		"deleted_at": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// getEnvOrDefault returns environment variable value or default
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
