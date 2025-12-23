@@ -1,277 +1,265 @@
 package websocket
-package websocket
 
 import (
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return 0	}		return len(userClients)	if userClients, ok := h.clients[userID]; ok {	defer h.mu.RUnlock()	h.mu.RLock()func (h *Hub) GetUserConnections(userID string) int {// GetUserConnections returns number of connections for a user}	return len(h.clients)	defer h.mu.RUnlock()	h.mu.RLock()func (h *Hub) GetConnectedUsers() int {// GetConnectedUsers returns number of connected users}	return time.Now().Format("20060102150405.000000")func generateID() string {// generateID generates a unique connection ID}	}		}			}				return			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))		case <-ticker.C:			}				return			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {			}				return				c.conn.WriteMessage(websocket.CloseMessage, []byte{})			if !ok {			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))		case message, ok := <-c.send:		select {	for {	}()		c.conn.Close()		ticker.Stop()	defer func() {	ticker := time.NewTicker(54 * time.Second)func (c *Client) writePump() {// writePump writes messages to the websocket connection}	}		}			}				c.send <- []byte(`{"type":"pong"}`)			if msgType, ok := msg["type"].(string); ok && msgType == "ping" {		if err := json.Unmarshal(message, &msg); err == nil {		var msg map[string]interface{}		// Handle incoming messages (ping, subscribe, etc.)		}			break			}				log.Printf("WebSocket error: %v", err)			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {		if err != nil {		_, message, err := c.conn.ReadMessage()	for {	})		return nil		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))	c.conn.SetPongHandler(func(string) error {	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))	}()		c.conn.Close()		c.hub.unregister <- c	defer func() {func (c *Client) readPump() {// readPump reads messages from the websocket connection}	})		client.readPump()		go client.writePump()		// Start goroutines		h.register <- client		// Register client		}			id:     generateID(),			userID: userID,			send:   make(chan []byte, 256),			conn:   c,			hub:    h,		client := &Client{		// Create client		}			return			c.Close()			log.Println("WebSocket connection rejected: no user_id")		if userID == "" {		}			}				userID = uid.(string)			if uid := c.Locals("user_id"); uid != nil {		if userID == "" {		userID := c.Query("user_id")		// Get user ID from query or locals	return websocket.New(func(c *websocket.Conn) {func (h *Hub) HandleWebSocket() fiber.Handler {// HandleWebSocket handles WebSocket connection upgrade}	return data	}		return []byte("{}")		log.Printf("Error marshaling message: %v", err)	if err != nil {	data, err := json.Marshal(message)func (h *Hub) marshalMessage(message *Message) []byte {// marshalMessage converts message to JSON}	})		Data:   data,		JobID:  validationID,		UserID: userID,		Type:   "validation_update",	h.Broadcast(&Message{func (h *Hub) BroadcastValidationUpdate(userID, validationID string, data map[string]interface{}) {// BroadcastValidationUpdate broadcasts validation completion}	})		Data:   data,		JobID:  jobID,		UserID: userID,		Type:   "job_progress",	h.Broadcast(&Message{	data["status"] = status	data["progress"] = progress	}		data = make(map[string]interface{})	if data == nil {func (h *Hub) BroadcastJobProgress(userID, jobID string, progress float32, status string, data map[string]interface{}) {// BroadcastJobProgress broadcasts job progress update}	h.broadcast <- message	message.Timestamp = time.Now()func (h *Hub) Broadcast(message *Message) {// Broadcast sends a message to user(s)}	}		}			h.mu.RUnlock()			}				}					}						}							close(client.send)						default:						case client.send <- h.marshalMessage(message):						select {					for _, client := range userClients {				for _, userClients := range h.clients {				// Broadcast to all			} else {				}					}						}							delete(userClients, client.id)							close(client.send)						default:						case client.send <- h.marshalMessage(message):						select {					for _, client := range userClients {				if userClients, ok := h.clients[message.UserID]; ok {			if message.UserID != "" {			// Broadcast to specific user or all users			h.mu.RLock()		case message := <-h.broadcast:			log.Printf("WebSocket client unregistered: user=%s, conn=%s", client.userID, client.id)			h.mu.Unlock()			}				}					}						delete(h.clients, client.userID)					if len(userClients) == 0 {					close(client.send)					delete(userClients, client.id)				if _, ok := userClients[client.id]; ok {			if userClients, ok := h.clients[client.userID]; ok {			h.mu.Lock()		case client := <-h.unregister:			log.Printf("WebSocket client registered: user=%s, conn=%s", client.userID, client.id)			h.mu.Unlock()			h.clients[client.userID][client.id] = client			}				h.clients[client.userID] = make(map[string]*Client)			if _, ok := h.clients[client.userID]; !ok {			h.mu.Lock()		case client := <-h.register:			return		case <-ctx.Done():		select {	for {func (h *Hub) Run(ctx context.Context) {// Run starts the hub's main loop}	}		unregister: make(chan *Client),		register:   make(chan *Client),		broadcast:  make(chan *Message, 256),		clients:    make(map[string]map[string]*Client),	return &Hub{func NewHub() *Hub {// NewHub creates a new WebSocket hub}	Timestamp time.Time              `json:"timestamp"`	Data      map[string]interface{} `json:"data"`	JobID     string                 `json:"job_id,omitempty"`	UserID    string                 `json:"user_id,omitempty"`	Type      string                 `json:"type"`type Message struct {// Message represents a websocket message}	id     string	userID string	send   chan []byte	conn   *websocket.Conn	hub    *Hubtype Client struct {// Client represents a websocket connection}	unregister chan *Client	register   chan *Client	// Register/Unregister channels	broadcast chan *Message	// Broadcast channel	mu      sync.RWMutex	clients map[string]map[string]*Client	// Registered clients (map[userID]map[connectionID]*Client)type Hub struct {// Hub maintains active websocket connections and broadcasts messages)	"github.com/gofiber/websocket/v2"	"github.com/gofiber/fiber/v2"	"time"	"sync"	"log"	"encoding/json"	"context"
+	"context"
+	"encoding/json"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
+)
+
+// Hub maintains active websocket connections and broadcasts messages
+type Hub struct {
+	// Registered clients (map[userID]map[connectionID]*Client)
+	clients map[string]map[string]*Client
+	mu      sync.RWMutex
+
+	// Broadcast channel
+	broadcast chan *Message
+
+	// Register/Unregister channels
+	register   chan *Client
+	unregister chan *Client
+}
+
+// Client represents a websocket connection
+type Client struct {
+	hub    *Hub
+	conn   *websocket.Conn
+	send   chan []byte
+	userID string
+	id     string
+}
+
+// Message represents a websocket message
+type Message struct {
+	Type      string                 `json:"type"`
+	UserID    string                 `json:"user_id,omitempty"`
+	JobID     string                 `json:"job_id,omitempty"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp time.Time              `json:"timestamp"`
+}
+
+// NewHub creates a new WebSocket hub
+func NewHub() *Hub {
+	return &Hub{
+		clients:    make(map[string]map[string]*Client),
+		broadcast:  make(chan *Message, 256),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+	}
+}
+
+// Run starts the hub's main loop
+func (h *Hub) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case client := <-h.register:
+			h.mu.Lock()
+			if _, ok := h.clients[client.userID]; !ok {
+				h.clients[client.userID] = make(map[string]*Client)
+			}
+			h.clients[client.userID][client.id] = client
+			h.mu.Unlock()
+			log.Printf("WebSocket client registered: user=%s, conn=%s", client.userID, client.id)
+		case client := <-h.unregister:
+			h.mu.Lock()
+			if userClients, ok := h.clients[client.userID]; ok {
+				if _, ok := userClients[client.id]; ok {
+					delete(userClients, client.id)
+					close(client.send)
+					if len(userClients) == 0 {
+						delete(h.clients, client.userID)
+					}
+				}
+			}
+			h.mu.Unlock()
+			log.Printf("WebSocket client unregistered: user=%s, conn=%s", client.userID, client.id)
+		case message := <-h.broadcast:
+			// Broadcast to specific user or all users
+			h.mu.RLock()
+			if message.UserID != "" {
+				if userClients, ok := h.clients[message.UserID]; ok {
+					for _, client := range userClients {
+						select {
+						case client.send <- h.marshalMessage(message):
+						default:
+							close(client.send)
+							delete(userClients, client.id)
+						}
+					}
+				}
+			} else {
+				// Broadcast to all
+				for _, userClients := range h.clients {
+					for _, client := range userClients {
+						select {
+						case client.send <- h.marshalMessage(message):
+						default:
+							close(client.send)
+						}
+					}
+				}
+			}
+			h.mu.RUnlock()
+		}
+	}
+}
+
+// Broadcast sends a message to user(s)
+func (h *Hub) Broadcast(message *Message) {
+	message.Timestamp = time.Now()
+	h.broadcast <- message
+}
+
+// BroadcastJobProgress broadcasts job progress update
+func (h *Hub) BroadcastJobProgress(userID, jobID string, progress float32, status string, data map[string]interface{}) {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	data["progress"] = progress
+	data["status"] = status
+	h.Broadcast(&Message{
+		Type:   "job_progress",
+		UserID: userID,
+		JobID:  jobID,
+		Data:   data,
+	})
+}
+
+// BroadcastValidationUpdate broadcasts validation completion
+func (h *Hub) BroadcastValidationUpdate(userID, validationID string, data map[string]interface{}) {
+	h.Broadcast(&Message{
+		Type:   "validation_update",
+		UserID: userID,
+		JobID:  validationID,
+		Data:   data,
+	})
+}
+
+// marshalMessage converts message to JSON
+func (h *Hub) marshalMessage(message *Message) []byte {
+	data, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshaling message: %v", err)
+		return []byte("{}")
+	}
+	return data
+}
+
+// HandleWebSocket handles WebSocket connection upgrade
+func (h *Hub) HandleWebSocket() fiber.Handler {
+	return websocket.New(func(c *websocket.Conn) {
+		// Get user ID from query or locals
+		userID := c.Query("user_id")
+		if userID == "" {
+			if uid := c.Locals("user_id"); uid != nil {
+				userID = uid.(string)
+			}
+		}
+		if userID == "" {
+			log.Println("WebSocket connection rejected: no user_id")
+			c.Close()
+			return
+		}
+
+		// Create client
+		client := &Client{
+			hub:    h,
+			conn:   c,
+			send:   make(chan []byte, 256),
+			userID: userID,
+			id:     generateID(),
+		}
+
+		// Register client
+		h.register <- client
+
+		// Start goroutines
+		go client.writePump()
+		client.readPump()
+	})
+}
+
+// readPump reads messages from the websocket connection
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			}
+			break
+		}
+		// Handle incoming messages (ping, subscribe, etc.)
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err == nil {
+			if msgType, ok := msg["type"].(string); ok && msgType == "ping" {
+				c.send <- []byte(`{"type":"pong"}`)
+			}
+		}
+	}
+}
+
+// writePump writes messages to the websocket connection
+func (c *Client) writePump() {
+	ticker := time.NewTicker(54 * time.Second)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// generateID generates a unique connection ID
+func generateID() string {
+	return time.Now().Format("20060102150405.000000")
+}
+
+// GetConnectedUsers returns number of connected users
+func (h *Hub) GetConnectedUsers() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
+// GetUserConnections returns number of connections for a user
+func (h *Hub) GetUserConnections(userID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if userClients, ok := h.clients[userID]; ok {
+		return len(userClients)
+	}
+	return 0
+}

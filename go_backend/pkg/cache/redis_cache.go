@@ -1,188 +1,180 @@
 package cache
-package cache
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return nil	}		}			return err		if err := c.Invalidate(ctx, pattern); err != nil {	for _, pattern := range patterns {	}		fmt.Sprintf("%s%s:*", AnalyticsKeyPrefix, userID),		fmt.Sprintf("%s%s:*", ValidationKeyPrefix, userID),		fmt.Sprintf("%s%s:*", DatasetKeyPrefix, userID),	patterns := []string{func (c *Cache) InvalidateUser(ctx context.Context, userID string) error {// InvalidateUser invalidates all user-related caches}	return c.Get(ctx, key, dest)	key := CacheKey(DatasetKeyPrefix, datasetID)func (c *Cache) GetDataset(ctx context.Context, datasetID string, dest interface{}) error {// GetDataset retrieves cached dataset}	return c.Set(ctx, key, dataset, DatasetCacheTTL)	key := CacheKey(DatasetKeyPrefix, datasetID)func (c *Cache) CacheDataset(ctx context.Context, datasetID string, dataset interface{}) error {// CacheDataset caches dataset metadata}	return c.Get(ctx, key, dest)	key := CacheKey(ValidationKeyPrefix, validationID)func (c *Cache) GetValidation(ctx context.Context, validationID string, dest interface{}) error {// GetValidation retrieves cached validation}	return c.Set(ctx, key, result, ValidationCacheTTL)	key := CacheKey(ValidationKeyPrefix, validationID)func (c *Cache) CacheValidation(ctx context.Context, validationID string, result interface{}) error {// CacheValidation caches validation result}	return fmt.Sprintf("%s%s", prefix, id)func CacheKey(prefix, id string) string {// CacheKey generates a cache key)	AnalyticsKeyPrefix = "analytics:"	AnalyticsCacheTTL = 10 * time.Minute	// Analytics - cache for 10 minutes	APIKeyPrefix = "api:"	APICacheTTL = 1 * time.Minute	// API responses - cache for 1 minute	SessionKeyPrefix = "session:"	SessionCacheTTL = 15 * time.Minute	// User sessions - cache for 15 minutes	DatasetKeyPrefix = "dataset:"	DatasetCacheTTL = 5 * time.Minute	// Dataset metadata - cache for 5 minutes	ValidationKeyPrefix = "validation:"	ValidationCacheTTL = 1 * time.Hour	// Validation results - cache for 1 hour (expensive to compute)const (// Predefined cache strategies}	return c.client.Close()func (c *Cache) Close() error {// Close closes the Redis connection}	return c.client.Expire(ctx, key, ttl).Err()func (c *Cache) Expire(ctx context.Context, key string, ttl time.Duration) error {// Expire sets TTL on existing key}	return c.client.IncrBy(ctx, key, amount).Result()func (c *Cache) IncrementBy(ctx context.Context, key string, amount int64) (int64, error) {// IncrementBy increments by amount}	return c.client.Incr(ctx, key).Result()func (c *Cache) Increment(ctx context.Context, key string) (int64, error) {// Increment increments a counter}	return c.client.SetNX(ctx, key, data, ttl).Result()	}		return false, fmt.Errorf("failed to marshal value: %w", err)	if err != nil {	data, err := json.Marshal(value)func (c *Cache) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {// SetNX sets only if not exists}	return nil	}		return c.client.Del(ctx, keys...).Err()	if len(keys) > 0 {	}		return err	if err := iter.Err(); err != nil {	}		keys = append(keys, iter.Val())	for iter.Next(ctx) {	keys := []string{}	iter := c.client.Scan(ctx, 0, pattern, 0).Iterator()func (c *Cache) Invalidate(ctx context.Context, pattern string) error {// Invalidate invalidates cache by pattern}	return count > 0, err	count, err := c.client.Exists(ctx, key).Result()func (c *Cache) Exists(ctx context.Context, key string) (bool, error) {// Exists checks if key exists}	return c.client.Del(ctx, keys...).Err()func (c *Cache) Delete(ctx context.Context, keys ...string) error {// Delete removes a key}	return json.Unmarshal([]byte(data), dest)	}		return fmt.Errorf("failed to get cache: %w", err)	if err != nil {	}		return fmt.Errorf("cache miss")	if err == redis.Nil {	data, err := c.client.Get(ctx, key).Result()func (c *Cache) Get(ctx context.Context, key string, dest interface{}) error {// Get retrieves a value}	return c.client.Set(ctx, key, data, ttl).Err()	}		return fmt.Errorf("failed to marshal value: %w", err)	if err != nil {	data, err := json.Marshal(value)func (c *Cache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {// Set stores a value with TTL}	return &Cache{client: client}, nil	}		return nil, fmt.Errorf("failed to connect to Redis: %w", err)	if err := client.Ping(ctx).Err(); err != nil {	defer cancel()	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)	// Test connection	client := redis.NewClient(opt)	}		opt.Password = password	if password != "" {	}		return nil, fmt.Errorf("invalid Redis URL: %w", err)	if err != nil {	opt, err := redis.ParseURL(redisURL)func NewCache(redisURL, password string) (*Cache, error) {// NewCache creates a new cache instance}	client *redis.Clienttype Cache struct {// Cache provides Redis-based caching with aggressive strategies)	"github.com/redis/go-redis/v9"	"time"	"fmt"	"encoding/json"	"context"import (
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// Cache provides Redis-based caching with aggressive strategies
+type Cache struct {
+	client *redis.Client
+}
+
+// NewCache creates a new cache instance
+func NewCache(redisURL, password string) (*Cache, error) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Redis URL: %w", err)
+	}
+	if password != "" {
+		opt.Password = password
+	}
+	client := redis.NewClient(opt)
+
+	// Test connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	return &Cache{client: client}, nil
+}
+
+// Set stores a value with TTL
+func (c *Cache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to marshal value: %w", err)
+	}
+	return c.client.Set(ctx, key, data, ttl).Err()
+}
+
+// Get retrieves a value
+func (c *Cache) Get(ctx context.Context, key string, dest interface{}) error {
+	data, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return fmt.Errorf("cache miss")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get cache: %w", err)
+	}
+	return json.Unmarshal([]byte(data), dest)
+}
+
+// Delete removes a key
+func (c *Cache) Delete(ctx context.Context, keys ...string) error {
+	return c.client.Del(ctx, keys...).Err()
+}
+
+// Exists checks if key exists
+func (c *Cache) Exists(ctx context.Context, key string) (bool, error) {
+	count, err := c.client.Exists(ctx, key).Result()
+	return count > 0, err
+}
+
+// Invalidate invalidates cache by pattern
+func (c *Cache) Invalidate(ctx context.Context, pattern string) error {
+	iter := c.client.Scan(ctx, 0, pattern, 0).Iterator()
+	keys := []string{}
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	if len(keys) > 0 {
+		return c.client.Del(ctx, keys...).Err()
+	}
+	return nil
+}
+
+// SetNX sets only if not exists
+func (c *Cache) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal value: %w", err)
+	}
+	return c.client.SetNX(ctx, key, data, ttl).Result()
+}
+
+// Increment increments a counter
+func (c *Cache) Increment(ctx context.Context, key string) (int64, error) {
+	return c.client.Incr(ctx, key).Result()
+}
+
+// IncrementBy increments by amount
+func (c *Cache) IncrementBy(ctx context.Context, key string, amount int64) (int64, error) {
+	return c.client.IncrBy(ctx, key, amount).Result()
+}
+
+// Expire sets TTL on existing key
+func (c *Cache) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	return c.client.Expire(ctx, key, ttl).Err()
+}
+
+// Close closes the Redis connection
+func (c *Cache) Close() error {
+	return c.client.Close()
+}
+
+// Predefined cache strategies
+const (
+	// Validation results - cache for 1 hour (expensive to compute)
+	ValidationKeyPrefix = "validation:"
+	ValidationCacheTTL  = 1 * time.Hour
+
+	// Dataset metadata - cache for 5 minutes
+	DatasetKeyPrefix = "dataset:"
+	DatasetCacheTTL  = 5 * time.Minute
+
+	// User sessions - cache for 15 minutes
+	SessionKeyPrefix = "session:"
+	SessionCacheTTL  = 15 * time.Minute
+
+	// API responses - cache for 1 minute
+	APIKeyPrefix = "api:"
+	APICacheTTL  = 1 * time.Minute
+
+	// Analytics - cache for 10 minutes
+	AnalyticsKeyPrefix = "analytics:"
+	AnalyticsCacheTTL  = 10 * time.Minute
+)
+
+// CacheKey generates a cache key
+func CacheKey(prefix, id string) string {
+	return fmt.Sprintf("%s%s", prefix, id)
+}
+
+// CacheValidation caches validation result
+func (c *Cache) CacheValidation(ctx context.Context, validationID string, result interface{}) error {
+	key := CacheKey(ValidationKeyPrefix, validationID)
+	return c.Set(ctx, key, result, ValidationCacheTTL)
+}
+
+// GetValidation retrieves cached validation
+func (c *Cache) GetValidation(ctx context.Context, validationID string, dest interface{}) error {
+	key := CacheKey(ValidationKeyPrefix, validationID)
+	return c.Get(ctx, key, dest)
+}
+
+// CacheDataset caches dataset metadata
+func (c *Cache) CacheDataset(ctx context.Context, datasetID string, dataset interface{}) error {
+	key := CacheKey(DatasetKeyPrefix, datasetID)
+	return c.Set(ctx, key, dataset, DatasetCacheTTL)
+}
+
+// GetDataset retrieves cached dataset
+func (c *Cache) GetDataset(ctx context.Context, datasetID string, dest interface{}) error {
+	key := CacheKey(DatasetKeyPrefix, datasetID)
+	return c.Get(ctx, key, dest)
+}
+
+// InvalidateUser invalidates all user-related caches
+func (c *Cache) InvalidateUser(ctx context.Context, userID string) error {
+	patterns := []string{
+		fmt.Sprintf("%s%s:*", DatasetKeyPrefix, userID),
+		fmt.Sprintf("%s%s:*", ValidationKeyPrefix, userID),
+		fmt.Sprintf("%s%s:*", AnalyticsKeyPrefix, userID),
+	}
+	for _, pattern := range patterns {
+		if err := c.Invalidate(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}

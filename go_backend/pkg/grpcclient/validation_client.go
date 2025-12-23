@@ -3,6 +3,7 @@ package grpcclient
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/sony/gobreaker"
@@ -12,13 +13,13 @@ import (
 
 	"github.com/tafolabi009/backend/go_backend/pkg/circuitbreaker"
 	"github.com/tafolabi009/backend/go_backend/pkg/logger"
-	pb "github.com/tafolabi009/backend/proto/validation"
+	pb "github.com/tafolabi009/backend/proto/synthos"
 )
 
 // ValidationClient wraps gRPC validation service with circuit breaker
 type ValidationClient struct {
 	conn    *grpc.ClientConn
-	client  pb.ValidationServiceClient
+	client  pb.ValidationEngineClient
 	breaker *circuitbreaker.CircuitBreaker
 	log     *logger.Logger
 }
@@ -39,7 +40,7 @@ func NewValidationClient(addr string) (*ValidationClient, error) {
 		return nil, fmt.Errorf("failed to connect to validation service: %w", err)
 	}
 
-	client := pb.NewValidationServiceClient(conn)
+	client := pb.NewValidationEngineClient(conn)
 
 	log := logger.Get().With("service", "validation-client")
 	breaker := circuitbreaker.NewCircuitBreaker(
@@ -57,8 +58,17 @@ func NewValidationClient(addr string) (*ValidationClient, error) {
 	}, nil
 }
 
+// CascadeResult holds the final result of cascade training
+type CascadeResult struct {
+	Status          string
+	ModelsCompleted int32
+	BestAccuracy    float64
+	BestModel       string
+}
+
 // TrainCascade initiates cascade training with circuit breaker protection
-func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath string, config *pb.CascadeConfig) (*pb.TrainCascadeResponse, error) {
+// TrainCascade is now a streaming RPC
+func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath string, config *pb.CascadeConfig) (*CascadeResult, error) {
 	traceID := ctx.Value("trace_id")
 	if traceID != nil {
 		v.log = v.log.With("trace_id", traceID)
@@ -74,37 +84,79 @@ func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath 
 
 	// Execute with circuit breaker
 	result, err := v.breaker.Execute(ctx, func() (interface{}, error) {
-		req := &pb.TrainCascadeRequest{
+		req := &pb.CascadeRequest{
 			JobId:       jobID,
-			DatasetPath: datasetPath,
+			SampleS3Path: datasetPath,
 			Config:      config,
 		}
 
-		resp, err := v.client.TrainCascade(ctx, req)
+		// TrainCascade returns a stream
+		stream, err := v.client.TrainCascade(ctx, req)
 		if err != nil {
-			v.log.Error("Cascade training failed", "error", err, "job_id", jobID)
+			v.log.Error("Cascade training failed to start", "error", err, "job_id", jobID)
 			return nil, err
 		}
 
-		return resp, nil
+		// Collect streaming results
+		var lastProgress *pb.CascadeProgress
+		var bestAccuracy float64
+		var bestModel string
+
+		for {
+			progress, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				v.log.Error("Cascade training stream error", "error", err, "job_id", jobID)
+				return nil, err
+			}
+
+			lastProgress = progress
+
+			// Track best model
+			if progress.Result != nil && progress.Result.ValidationAccuracy > bestAccuracy {
+				bestAccuracy = progress.Result.ValidationAccuracy
+				bestModel = progress.Result.ModelName
+			}
+
+			// Check for errors
+			if progress.Status == "failed" && progress.Error != nil {
+				return nil, fmt.Errorf("cascade training failed: %s", progress.Error.Message)
+			}
+
+			v.log.Debug("Cascade progress",
+				"tier", progress.CurrentTier,
+				"variant", progress.CurrentVariant,
+				"completed", progress.ModelsCompleted,
+				"total", progress.ModelsTotal,
+				"progress", progress.ProgressPercent)
+		}
+
+		return &CascadeResult{
+			Status:          "completed",
+			ModelsCompleted: lastProgress.ModelsCompleted,
+			BestAccuracy:    bestAccuracy,
+			BestModel:       bestModel,
+		}, nil
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("cascade training failed: %w", err)
 	}
 
-	response := result.(*pb.TrainCascadeResponse)
+	response := result.(*CascadeResult)
 	v.log.Info("Cascade training completed",
 		"job_id", jobID,
 		"status", response.Status,
-		"models", len(response.Results),
+		"models_completed", response.ModelsCompleted,
 	)
 
 	return response, nil
 }
 
 // AnalyzeDiversity performs diversity analysis with circuit breaker
-func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetPath string, config *pb.DiversityConfig) (*pb.AnalyzeDiversityResponse, error) {
+func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetPath string) (*pb.DiversityResponse, error) {
 	traceID := ctx.Value("trace_id")
 	if traceID != nil {
 		v.log = v.log.With("trace_id", traceID)
@@ -119,10 +171,11 @@ func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetP
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	result, err := v.breaker.Execute(ctx, func() (interface{}, error) {
-		req := &pb.AnalyzeDiversityRequest{
-			JobId:       jobID,
-			DatasetPath: datasetPath,
-			Config:      config,
+		req := &pb.DiversityRequest{
+			JobId:     jobID,
+			DatasetId: jobID,
+			S3Path:    datasetPath,
+			Format:    pb.DataFormat_CSV,
 		}
 
 		resp, err := v.client.AnalyzeDiversity(ctx, req)
@@ -138,10 +191,10 @@ func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetP
 		return nil, fmt.Errorf("diversity analysis failed: %w", err)
 	}
 
-	response := result.(*pb.AnalyzeDiversityResponse)
+	response := result.(*pb.DiversityResponse)
 	v.log.Info("Diversity analysis completed",
 		"job_id", jobID,
-		"score", response.Score.OverallScore,
+		"status", response.Status,
 	)
 
 	return response, nil

@@ -14,9 +14,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
-	collapsepb "github.com/tafolabi009/backend/proto/collapse"
 	datapb "github.com/tafolabi009/backend/proto/data"
-	validationpb "github.com/tafolabi009/backend/proto/validation"
+	synthospb "github.com/tafolabi009/backend/proto/synthos"
 )
 
 // CircuitBreakerState represents the state of a circuit breaker
@@ -116,8 +115,8 @@ func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 
 // Clients holds all gRPC client connections with advanced features
 type Clients struct {
-	Validation validationpb.ValidationServiceClient
-	Collapse   collapsepb.CollapseServiceClient
+	Validation synthospb.ValidationEngineClient
+	Collapse   synthospb.CollapseEngineClient
 	Data       datapb.DataServiceClient
 
 	validationConn *grpc.ClientConn
@@ -249,7 +248,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 		return nil, fmt.Errorf("failed to connect to validation service: %w", err)
 	}
 	clients.validationConn = validationConn
-	clients.Validation = validationpb.NewValidationServiceClient(validationConn)
+	clients.Validation = synthospb.NewValidationEngineClient(validationConn)
 
 	// Connect to collapse service
 	log.Printf("Connecting to Collapse Service at %s", collapseAddr)
@@ -259,7 +258,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 		return nil, fmt.Errorf("failed to connect to collapse service: %w", err)
 	}
 	clients.collapseConn = collapseConn
-	clients.Collapse = collapsepb.NewCollapseServiceClient(collapseConn)
+	clients.Collapse = synthospb.NewCollapseEngineClient(collapseConn)
 
 	// Connect to data service
 	log.Printf("Connecting to Data Service at %s", dataAddr)
@@ -294,9 +293,10 @@ func (c *Clients) Close() {
 
 // Health checks all gRPC services
 func (c *Clients) Health(ctx context.Context) error {
-	// Check validation service
-	_, err := c.Validation.GetTrainingProgress(ctx, &validationpb.ProgressRequest{JobId: "health-check"})
-	if err != nil && err.Error() != "rpc error: code = NotFound desc = Job health-check not found" {
+	// Check validation service using AnalyzeDiversity with empty request
+	// This will fail but confirms the service is reachable
+	_, err := c.Validation.AnalyzeDiversity(ctx, &synthospb.DiversityRequest{DatasetId: "health-check"})
+	if err != nil && !isServiceAvailable(err) {
 		return fmt.Errorf("validation service health check failed: %w", err)
 	}
 
@@ -304,8 +304,18 @@ func (c *Clients) Health(ctx context.Context) error {
 	return nil
 }
 
+// isServiceAvailable checks if the error indicates the service is reachable
+func isServiceAvailable(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	// Service is available if we get any response other than Unavailable
+	return st.Code() != codes.Unavailable
+}
+
 // CallValidationWithRetry calls validation service with circuit breaker and retry logic
-func (c *Clients) CallValidationWithRetry(ctx context.Context, fn func(context.Context, validationpb.ValidationServiceClient) error) error {
+func (c *Clients) CallValidationWithRetry(ctx context.Context, fn func(context.Context, synthospb.ValidationEngineClient) error) error {
 	return c.validationCB.Call(func() error {
 		return c.RetryWithBackoff(ctx, func() error {
 			return fn(ctx, c.Validation)
@@ -314,7 +324,7 @@ func (c *Clients) CallValidationWithRetry(ctx context.Context, fn func(context.C
 }
 
 // CallCollapseWithRetry calls collapse service with circuit breaker and retry logic
-func (c *Clients) CallCollapseWithRetry(ctx context.Context, fn func(context.Context, collapsepb.CollapseServiceClient) error) error {
+func (c *Clients) CallCollapseWithRetry(ctx context.Context, fn func(context.Context, synthospb.CollapseEngineClient) error) error {
 	return c.collapseCB.Call(func() error {
 		return c.RetryWithBackoff(ctx, func() error {
 			return fn(ctx, c.Collapse)

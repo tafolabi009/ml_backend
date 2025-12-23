@@ -31,11 +31,20 @@ WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+ENV PIP_DEFAULT_TIMEOUT=120
+RUN set -eux; \
+    for i in 1 2 3; do \
+      python -m pip install --no-cache-dir -r requirements.txt && break || echo "pip install attempt $i failed, retrying..."; \
+      sleep 10; \
+    done
 
 # Install resonance-neural-networks from GitHub repository
 # This ensures we always have the latest version
-RUN pip install --no-cache-dir git+https://github.com/tafolabi009/NEURON_NEW.git
+RUN set -eux; \
+    for i in 1 2 3; do \
+      python -m pip install --no-cache-dir git+https://github.com/tafolabi009/NEURON_NEW.git && break || echo "pip git install attempt $i failed, retrying..."; \
+      sleep 10; \
+    done
 
 # Copy application code
 COPY src/ ./src/

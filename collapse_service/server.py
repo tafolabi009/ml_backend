@@ -16,8 +16,9 @@ from typing import Dict, Any
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-import collapse_pb2
-import collapse_pb2_grpc
+# Use unified synthos proto stubs
+from synthos_proto import synthos_pb2 as collapse_pb2
+from synthos_proto import synthos_pb2_grpc as collapse_pb2_grpc
 from collapse_engine.detector import CollapseDetector, CollapseConfig
 from collapse_engine.localizer import CollapseLocalizer, LocalizationConfig
 from collapse_engine.recommender import Recommender
@@ -31,8 +32,8 @@ logger = logging.getLogger(__name__)
 active_jobs: Dict[str, Any] = {}
 
 
-class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
-    """gRPC servicer for collapse detection and recommendations"""
+class CollapseEngineServicer(collapse_pb2_grpc.CollapseEngineServicer):
+    """gRPC servicer for collapse detection and recommendations (using synthos proto)"""
     
     def __init__(self):
         self.detector = None
@@ -80,23 +81,21 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Update job status
             active_jobs[job_id]['status'] = 'completed'
             
-            # Convert to proto
-            response = collapse_pb2.DetectCollapseResponse(job_id=job_id)
-            
-            # Map collapse score
-            response.score.CopyFrom(collapse_pb2.CollapseScore(
-                overall_score=collapse_score.overall_score,
-                confidence=collapse_score.confidence,
-                severity=collapse_score.severity,
+            # Convert to proto using synthos message types
+            response = collapse_pb2.CollapseResponse(
+                job_id=job_id,
+                dataset_id=request.dataset_id,
                 collapse_detected=collapse_score.collapse_detected,
                 collapse_type=collapse_score.collapse_type or "",
-                affected_dimensions=collapse_score.affected_dimensions
-            ))
+                severity=collapse_score.severity,
+                overall_score=collapse_score.overall_score,
+                confidence=collapse_score.confidence
+            )
             
             # Map scale prediction
             if hasattr(collapse_score, 'scale_prediction'):
                 pred = collapse_score.scale_prediction
-                response.score.scale_prediction.CopyFrom(collapse_pb2.ScalePrediction(
+                response.scale_prediction.CopyFrom(collapse_pb2.ScalePrediction(
                     score_at_1m=pred.get('1M', 0.0),
                     score_at_10m=pred.get('10M', 0.0),
                     score_at_100m=pred.get('100M', 0.0),
@@ -104,17 +103,15 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
                     recommendation=pred.get('recommendation', '')
                 ))
             
-            # Map dimensions
+            # Map dimensions using DimensionScore
             for dim_name, dim_score in collapse_score.dimensions.items():
-                response.dimensions[dim_name].CopyFrom(collapse_pb2.DimensionScore(
-                    name=dim_name,
-                    score=dim_score.score,
-                    threshold=dim_score.threshold,
-                    passed=dim_score.passed,
-                    severity=dim_score.severity,
-                    issues=dim_score.issues,
-                    confidence=dim_score.confidence
-                ))
+                dim = response.dimensions.add()
+                dim.dimension = dim_name
+                dim.score = dim_score.score
+                dim.threshold = dim_score.threshold
+                dim.passed = dim_score.passed
+                dim.severity = dim_score.severity
+                dim.issues.extend(dim_score.issues if dim_score.issues else [])
             
             logger.info(f"Collapse detection completed for job {job_id}")
             return response
@@ -122,15 +119,19 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
         except Exception as e:
             logger.error(f"Error in DetectCollapse for job {job_id}: {e}", exc_info=True)
             active_jobs[job_id]['status'] = 'failed'
-            return collapse_pb2.DetectCollapseResponse(
+            return collapse_pb2.CollapseResponse(
                 job_id=job_id,
-                error_message=str(e)
+                error=collapse_pb2.ErrorInfo(
+                    code=3001,
+                    message=str(e),
+                    retryable=True
+                )
             )
     
-    def LocalizeCollapse(self, request, context):
-        """Localize collapse points in dataset"""
+    def LocalizeProblems(self, request, context):
+        """Localize collapse points in dataset (synthos: LocalizeProblems)"""
         job_id = request.job_id
-        logger.info(f"LocalizeCollapse request received for job {job_id}")
+        logger.info(f"LocalizeProblems request received for job {job_id}")
         
         try:
             # Parse config
@@ -165,37 +166,43 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Update job status
             active_jobs[job_id]['status'] = 'completed'
             
-            # Convert to proto
-            response = collapse_pb2.LocalizeCollapseResponse(job_id=job_id)
+            # Convert to synthos proto LocalizationResponse
+            response = collapse_pb2.LocalizationResponse(
+                job_id=job_id,
+                dataset_id=request.dataset_id,
+                validation_id=request.validation_id
+            )
             
             for result in results:
-                loc_result = collapse_pb2.LocalizationResult(
-                    region_id=result.region_id,
-                    start_row=result.start_row,
-                    end_row=result.end_row,
-                    affected_columns=result.affected_columns,
-                    issue_type=result.issue_type,
-                    severity_score=result.severity_score,
-                    confidence=result.confidence,
-                    description=result.description or ""
-                )
+                region = response.regions.add()
+                region.region_id = result.region_id
+                region.row_start = result.start_row
+                region.row_end = result.end_row
+                region.issue_type = result.issue_type
+                region.impact_score = result.severity_score
+                region.severity_score = result.severity_score
+                region.confidence = result.confidence
+                region.affected_columns.extend(result.affected_columns or [])
+                region.description = result.description or ""
                 
                 # Map dimension impacts
                 if hasattr(result, 'dimension_impacts'):
                     for dim, impact in result.dimension_impacts.items():
-                        loc_result.dimension_impacts[dim] = impact
-                
-                response.regions.append(loc_result)
+                        region.dimension_impacts[dim] = impact
             
             logger.info(f"Collapse localization completed for job {job_id}")
             return response
             
         except Exception as e:
-            logger.error(f"Error in LocalizeCollapse for job {job_id}: {e}", exc_info=True)
+            logger.error(f"Error in LocalizeProblems for job {job_id}: {e}", exc_info=True)
             active_jobs[job_id]['status'] = 'failed'
-            return collapse_pb2.LocalizeCollapseResponse(
+            return collapse_pb2.LocalizationResponse(
                 job_id=job_id,
-                error_message=str(e)
+                error=collapse_pb2.ErrorInfo(
+                    code=3002,
+                    message=str(e),
+                    retryable=True
+                )
             )
     
     def GenerateRecommendations(self, request, context):
@@ -228,38 +235,36 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Update job status
             active_jobs[job_id]['status'] = 'completed'
             
-            # Convert to proto
-            response = collapse_pb2.RecommendationsResponse(job_id=job_id)
+            # Convert to synthos proto RecommendationResponse
+            response = collapse_pb2.RecommendationResponse(
+                job_id=job_id,
+                dataset_id=request.dataset_id,
+                validation_id=request.validation_id
+            )
             
             for rec in recommendations:
-                recommendation = collapse_pb2.Recommendation(
-                    priority=rec.priority,
-                    category=rec.category,
-                    title=rec.title,
-                    description=rec.description,
-                    confidence=rec.confidence
-                )
+                recommendation = response.recommendations.add()
+                recommendation.priority = rec.priority
+                recommendation.category = rec.category
+                recommendation.title = rec.title
+                recommendation.description = rec.description
+                recommendation.confidence = rec.confidence
                 
                 # Map impact
                 if hasattr(rec, 'impact'):
-                    recommendation.impact.CopyFrom(collapse_pb2.Impact(
-                        current_risk_score=rec.impact.current_risk_score,
-                        expected_risk_score=rec.impact.expected_risk_score,
-                        improvement=rec.impact.improvement
-                    ))
+                    recommendation.impact.current_risk_score = rec.impact.current_risk_score
+                    recommendation.impact.expected_risk_score = rec.impact.expected_risk_score
+                    recommendation.impact.improvement = rec.impact.improvement
                 
                 # Map implementation
                 if hasattr(rec, 'implementation'):
-                    recommendation.implementation.CopyFrom(collapse_pb2.Implementation(
-                        method=rec.implementation.method,
-                        affected_rows=rec.implementation.affected_rows,
-                        affected_columns=rec.implementation.affected_columns or [],
-                        estimated_time=rec.implementation.estimated_time,
-                        steps=rec.implementation.steps or [],
-                        code_snippet=rec.implementation.code_snippet or ""
-                    ))
-                
-                response.recommendations.append(recommendation)
+                    recommendation.implementation.method = rec.implementation.method
+                    recommendation.implementation.affected_rows = rec.implementation.affected_rows
+                    recommendation.implementation.affected_columns.extend(rec.implementation.affected_columns or [])
+                    recommendation.implementation.estimated_time = rec.implementation.estimated_time
+                    recommendation.implementation.steps.extend(rec.implementation.steps or [])
+                    if rec.implementation.code_snippet:
+                        recommendation.implementation.code_snippet = rec.implementation.code_snippet
             
             logger.info(f"Recommendations generation completed for job {job_id}")
             return response
@@ -267,9 +272,13 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
         except Exception as e:
             logger.error(f"Error in GenerateRecommendations for job {job_id}: {e}", exc_info=True)
             active_jobs[job_id]['status'] = 'failed'
-            return collapse_pb2.RecommendationsResponse(
+            return collapse_pb2.RecommendationResponse(
                 job_id=job_id,
-                error_message=str(e)
+                error=collapse_pb2.ErrorInfo(
+                    code=3003,
+                    message=str(e),
+                    retryable=False
+                )
             )
     
     def GenerateAdvancedRecommendations(self, request, context):
@@ -325,7 +334,7 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
 
 
 def serve():
-    """Start the Collapse Service gRPC server"""
+    """Start the Collapse Service gRPC server (using synthos proto CollapseEngine)"""
     port = os.getenv("PORT", "50053")
     
     # Configure server with threading for CPU-bound operations
@@ -337,16 +346,16 @@ def serve():
         ]
     )
     
-    # Add servicer
-    collapse_pb2_grpc.add_CollapseServiceServicer_to_server(
-        CollapseServiceServicer(), server
+    # Add servicer using synthos CollapseEngine
+    collapse_pb2_grpc.add_CollapseEngineServicer_to_server(
+        CollapseEngineServicer(), server
     )
     
     server.add_insecure_port(f"[::]:{port}")
     server.start()
-    logger.info(f"🚀 Collapse Service started on port {port}")
+    logger.info(f"🚀 Collapse Engine Service started on port {port}")
     logger.info(f"  - DetectCollapse: Ready for collapse detection requests")
-    logger.info(f"  - LocalizeCollapse: Ready for localization requests")
+    logger.info(f"  - LocalizeProblems: Ready for localization requests")
     logger.info(f"  - GenerateRecommendations: Ready for recommendation requests")
     logger.info(f"  - GPU Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():

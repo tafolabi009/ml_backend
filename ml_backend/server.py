@@ -2,6 +2,7 @@
 """
 Unified gRPC Server for ML Backend
 Serves both ValidationEngine and CollapseEngine services
+Uses unified synthos proto for cross-service compatibility
 """
 
 import asyncio
@@ -14,8 +15,8 @@ from pathlib import Path
 import grpc
 from grpc import aio
 
-# Import generated protobuf stubs
-from src.grpc_services import validation_pb2_grpc
+# Import generated protobuf stubs from unified synthos package
+from src.grpc_services.synthos.proto import synthos_pb2_grpc
 from src.grpc_services.validation_server_complete import (
     ValidationEngineServicer,
     CollapseEngineServicer
@@ -88,11 +89,11 @@ async def serve():
         'enable_mixed_precision': os.getenv('ENABLE_MIXED_PRECISION', 'true').lower() == 'true',
     }
     
-    # Register servicers
-    validation_pb2_grpc.add_ValidationEngineServicer_to_server(
+    # Register servicers using unified synthos proto
+    synthos_pb2_grpc.add_ValidationEngineServicer_to_server(
         ValidationEngineServicer(config, hardware_config), validation_server
     )
-    validation_pb2_grpc.add_CollapseEngineServicer_to_server(
+    synthos_pb2_grpc.add_CollapseEngineServicer_to_server(
         CollapseEngineServicer(config), collapse_server
     )
     

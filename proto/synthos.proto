@@ -1,0 +1,488 @@
+// SynthOS Unified Proto Definition
+// This is the SINGLE SOURCE OF TRUTH for all gRPC services.
+// All services (Go, Python) must generate stubs from this file.
+//
+// Generated stubs:
+// - Go: proto/gen/go/synthos/
+// - Python: ml_backend/src/grpc_services/
+//
+syntax = "proto3";
+
+package synthos;
+
+option go_package = "github.com/tafolabi009/backend/proto/synthos";
+
+// ============================================================================
+// Validation Engine Service
+// Handles diversity analysis, cascade training, and predictions
+// ============================================================================
+
+service ValidationEngine {
+  // Phase 2: Analyze diversity and create stratified sample
+  rpc AnalyzeDiversity(DiversityRequest) returns (DiversityResponse);
+  
+  // Phase 3: Pre-screen against collapse signature library
+  rpc PreScreenRisk(PreScreenRequest) returns (PreScreenResponse);
+  
+  // Phase 4: Multi-scale cascade training (STREAMING every 10s)
+  rpc TrainCascade(CascadeRequest) returns (stream CascadeProgress);
+  
+  // Phase 5: Get final predictions with confidence intervals
+  rpc GetPredictions(PredictionRequest) returns (PredictionResponse);
+}
+
+// ============================================================================
+// Collapse Engine Service  
+// Handles collapse detection, localization, and recommendations
+// ============================================================================
+
+service CollapseEngine {
+  // Phase 5: Detect collapse in cascade results
+  rpc DetectCollapse(CollapseRequest) returns (CollapseResponse);
+  
+  // Phase 6: Pinpoint problematic data regions
+  rpc LocalizeProblems(LocalizationRequest) returns (LocalizationResponse);
+  
+  // Phase 6: Generate actionable recommendations
+  rpc GenerateRecommendations(RecommendationRequest) returns (RecommendationResponse);
+}
+
+// ============================================================================
+// Data Format Enum
+// ============================================================================
+
+enum DataFormat {
+  UNKNOWN_FORMAT = 0;
+  CSV = 1;
+  JSON = 2;
+  JSONL = 3;
+  PARQUET = 4;
+  HDF5 = 5;
+  ARROW = 6;
+  FEATHER = 7;
+  EXCEL = 8;
+  TSV = 9;
+}
+
+// ============================================================================
+// Common Types
+// ============================================================================
+
+message ErrorInfo {
+  int32 code = 1;
+  string message = 2;
+  string details = 3;
+  bool retryable = 4;
+  int32 retry_after_seconds = 5;
+}
+
+// ============================================================================
+// Phase 2: Diversity Analysis
+// ============================================================================
+
+message DiversityRequest {
+  string dataset_id = 1;
+  string s3_path = 2;
+  int64 row_count = 3;
+  DataFormat format = 4;
+  // Optional job metadata
+  string job_id = 5;
+  map<string, string> metadata = 6;
+}
+
+message DiversityResponse {
+  string dataset_id = 1;
+  string sample_s3_path = 2;
+  DiversityMetrics metrics = 3;
+  repeated Cluster clusters = 4;
+  int32 sampling_confidence = 5;
+  string status = 6;  // "completed", "failed"
+  ErrorInfo error = 7;
+}
+
+message DiversityMetrics {
+  double entropy = 1;
+  double gini_coefficient = 2;
+  int32 cluster_count = 3;
+  repeated CorrelationPair correlations = 4;
+  double rare_pattern_percentage = 5;
+  double outlier_percentage = 6;
+  // Additional scores for compatibility
+  double overall_score = 7;
+  double spread_score = 8;
+  double balance_score = 9;
+}
+
+message Cluster {
+  int32 cluster_id = 1;
+  int64 size = 2;
+  repeated double centroid = 3;
+  double density = 4;
+}
+
+message CorrelationPair {
+  string column_a = 1;
+  string column_b = 2;
+  double correlation = 3;
+}
+
+// ============================================================================
+// Phase 3: Pre-Screening
+// ============================================================================
+
+message PreScreenRequest {
+  string dataset_id = 1;
+  DiversityMetrics diversity = 2;
+}
+
+message PreScreenResponse {
+  string dataset_id = 1;
+  int32 pre_risk_score = 2;
+  repeated SignatureMatch matches = 3;
+  bool should_proceed = 4;
+  string recommendation = 5;
+  ErrorInfo error = 6;
+}
+
+message SignatureMatch {
+  string signature_id = 1;
+  string collapse_type = 2;
+  double similarity = 3;
+  string historical_outcome = 4;
+}
+
+// ============================================================================
+// Phase 4: Cascade Training (STREAMING)
+// ============================================================================
+
+message CascadeRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string sample_s3_path = 3;
+  CascadeConfig config = 4;
+  // Job metadata
+  string job_id = 5;
+  map<string, string> metadata = 6;
+}
+
+message CascadeConfig {
+  repeated ModelTier tiers = 1;
+  string target_architecture = 2;
+  int64 target_model_size = 3;
+  int32 vocab_size = 4;
+  // Legacy compatibility fields
+  int32 num_epochs = 5;
+  int32 batch_size = 6;
+  float learning_rate = 7;
+  bool use_multi_gpu = 8;
+  int32 num_gpus = 9;
+}
+
+message ModelTier {
+  int32 tier_number = 1;
+  int64 model_size = 2;
+  int32 num_variants = 3;
+  int64 training_rows = 4;
+  string tier_name = 5;  // "light", "medium", "heavy"
+}
+
+message CascadeProgress {
+  string dataset_id = 1;
+  string validation_id = 2;
+  int32 current_tier = 3;
+  int32 current_variant = 4;
+  int32 models_completed = 5;
+  int32 models_total = 6;
+  double progress_percent = 7;
+  
+  // Real-time metrics
+  double current_loss = 8;
+  double current_accuracy = 9;
+  map<int32, double> gpu_utilization = 10;
+  string estimated_completion = 11;
+  
+  // Completed model result
+  ModelResult result = 12;
+  
+  // Status
+  bool is_complete = 13;
+  string status = 14;  // "running", "completed", "failed"
+  ErrorInfo error = 15;
+}
+
+message ModelResult {
+  int32 tier = 1;
+  int32 variant = 2;
+  int64 model_size = 3;
+  string model_name = 4;
+  
+  // Training metrics
+  double training_loss = 5;
+  double validation_loss = 6;
+  double validation_accuracy = 7;
+  double training_time_seconds = 8;
+  int32 convergence_epoch = 9;
+  int32 total_epochs = 10;
+  int32 best_epoch = 11;
+  
+  // Collapse detection
+  bool collapse_detected = 12;
+  
+  // Spectral metrics
+  SpectralMetrics spectral_metrics = 13;
+  
+  // Gradient statistics
+  GradientStats gradient_stats = 14;
+  
+  // Loss curve
+  repeated double loss_curve = 15;
+  
+  // Additional metrics map
+  map<string, double> additional_metrics = 16;
+}
+
+message SpectralMetrics {
+  double spectral_energy = 1;
+  double spectral_entropy = 2;
+  double frequency_concentration = 3;
+  double representation_variance = 4;
+}
+
+message GradientStats {
+  double total_norm = 1;
+  double max_grad = 2;
+  double min_grad = 3;
+  double grad_range = 4;
+}
+
+// ============================================================================
+// Phase 5: Predictions
+// ============================================================================
+
+message PredictionRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  repeated ModelResult cascade_results = 3;
+  int64 target_model_size = 4;
+}
+
+message PredictionResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  double predicted_accuracy = 3;
+  ConfidenceInterval confidence = 4;
+  ScalingLawCoefficients scaling = 5;
+  int32 final_risk_score = 6;
+  ErrorInfo error = 7;
+}
+
+message ConfidenceInterval {
+  double lower_bound = 1;
+  double upper_bound = 2;
+  double confidence_level = 3;
+}
+
+message ScalingLawCoefficients {
+  double a = 1;
+  double b = 2;
+  double c = 3;
+  double r_squared = 4;
+}
+
+// ============================================================================
+// Phase 5: Collapse Detection
+// ============================================================================
+
+message CollapseRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  repeated ModelResult cascade_results = 3;
+  DiversityMetrics original_diversity = 4;
+  // Job metadata
+  string job_id = 5;
+  string dataset_path = 6;
+  DataFormat data_format = 7;
+  CollapseConfig config = 8;
+}
+
+message CollapseConfig {
+  int32 chunk_size = 1;
+  bool use_gpu = 2;
+  int32 num_gpus = 3;
+  map<string, float> dimension_thresholds = 4;
+  bool enable_advanced_analysis = 5;
+  float confidence_threshold = 6;
+}
+
+message CollapseResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string job_id = 3;
+  
+  bool collapse_detected = 4;
+  string collapse_type = 5;
+  string severity = 6;
+  double overall_score = 7;
+  double confidence = 8;
+  
+  // Multi-dimensional scores
+  repeated DimensionScore dimensions = 9;
+  
+  // Root causes
+  repeated RootCause root_causes = 10;
+  
+  // Scale predictions
+  ScalePrediction scale_prediction = 11;
+  
+  repeated string warnings = 12;
+  ErrorInfo error = 13;
+}
+
+message DimensionScore {
+  string dimension = 1;
+  double score = 2;
+  double threshold = 3;
+  bool passed = 4;
+  string severity = 5;
+  repeated string issues = 6;
+}
+
+message RootCause {
+  string cause = 1;
+  double percentage = 2;
+  string description = 3;
+}
+
+message ScalePrediction {
+  double score_at_1m = 1;
+  double score_at_10m = 2;
+  double score_at_100m = 3;
+  double score_at_1b = 4;
+  string recommendation = 5;
+}
+
+// ============================================================================
+// Phase 6: Localization
+// ============================================================================
+
+message LocalizationRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string sample_s3_path = 3;
+  repeated ModelResult cascade_results = 4;
+  CollapseResponse collapse_info = 5;
+  // Job metadata
+  string job_id = 6;
+  string dataset_path = 7;
+  DataFormat data_format = 8;
+  LocalizationConfig config = 9;
+}
+
+message LocalizationConfig {
+  int32 chunk_size = 1;
+  int32 top_k_regions = 2;
+  bool use_gpu = 3;
+  repeated string focus_dimensions = 4;
+}
+
+message LocalizationResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string job_id = 3;
+  
+  repeated ProblematicRegion regions = 4;
+  repeated AblationResult ablations = 5;
+  
+  map<string, string> metadata = 6;
+  ErrorInfo error = 7;
+}
+
+message ProblematicRegion {
+  string region_id = 1;
+  int64 row_start = 2;
+  int64 row_end = 3;
+  string issue_type = 4;
+  double impact_score = 5;
+  double severity_score = 6;
+  double confidence = 7;
+  repeated string affected_columns = 8;
+  string description = 9;
+  map<string, double> dimension_impacts = 10;
+}
+
+message AblationResult {
+  string region_id = 1;
+  int32 risk_score_before = 2;
+  int32 risk_score_after = 3;
+  int32 improvement = 4;
+  bool hypothesis_confirmed = 5;
+}
+
+// ============================================================================
+// Phase 6: Recommendations
+// ============================================================================
+
+message RecommendationRequest {
+  string dataset_id = 1;
+  string validation_id = 2;
+  LocalizationResponse localization = 3;
+  CollapseResponse collapse_info = 4;
+  // Job metadata
+  string job_id = 5;
+  string dataset_path = 6;
+  RecommendationConfig config = 7;
+}
+
+message RecommendationConfig {
+  int32 max_recommendations = 1;
+  bool include_impact_estimates = 2;
+  bool include_implementation_code = 3;
+  repeated string focus_categories = 4;
+}
+
+message RecommendationResponse {
+  string dataset_id = 1;
+  string validation_id = 2;
+  string job_id = 3;
+  
+  repeated Recommendation recommendations = 4;
+  CombinedImpact combined_impact = 5;
+  
+  ErrorInfo error = 6;
+}
+
+message Recommendation {
+  int32 priority = 1;
+  string category = 2;
+  string title = 3;
+  string description = 4;
+  double confidence = 5;
+  
+  Impact impact = 6;
+  Implementation implementation = 7;
+}
+
+message Impact {
+  double current_risk_score = 1;
+  double expected_risk_score = 2;
+  double improvement = 3;
+  map<string, double> dimension_improvements = 4;
+}
+
+message Implementation {
+  string method = 1;
+  int64 affected_rows = 2;
+  repeated string affected_columns = 3;
+  string estimated_time = 4;
+  repeated string steps = 5;
+  string code_snippet = 6;
+  string script_url = 7;
+}
+
+message CombinedImpact {
+  double current_risk_score = 1;
+  double expected_risk_score = 2;
+  double total_improvement = 3;
+  string estimated_time = 4;
+  repeated string prerequisites = 5;
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -11,9 +12,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/google/uuid"
-	collapsepb "github.com/tafolabi009/backend/proto/collapse"
 	datapb "github.com/tafolabi009/backend/proto/data"
-	validationpb "github.com/tafolabi009/backend/proto/validation"
+	synthospb "github.com/tafolabi009/backend/proto/synthos"
 )
 
 // OrchestratorService manages the entire orchestration system
@@ -22,9 +22,9 @@ type OrchestratorService struct {
 	resourceManager *ResourceManager
 	pipelineManager *PipelineManager
 
-	// gRPC clients
-	validationClient validationpb.ValidationServiceClient
-	collapseClient   collapsepb.CollapseServiceClient
+	// gRPC clients - using unified synthos proto
+	validationClient synthospb.ValidationEngineClient
+	collapseClient   synthospb.CollapseEngineClient
 	dataClient       datapb.DataServiceClient
 
 	validationConn *grpc.ClientConn
@@ -80,8 +80,8 @@ func NewOrchestratorService(workers int, validationAddr, collapseAddr, dataAddr 
 		queue:            NewJobQueue(workers),
 		resourceManager:  NewResourceManager(workers),
 		pipelineManager:  NewPipelineManager(),
-		validationClient: validationpb.NewValidationServiceClient(validationConn),
-		collapseClient:   collapsepb.NewCollapseServiceClient(collapseConn),
+		validationClient: synthospb.NewValidationEngineClient(validationConn),
+		collapseClient:   synthospb.NewCollapseEngineClient(collapseConn),
 		dataClient:       datapb.NewDataServiceClient(dataConn),
 		validationConn:   validationConn,
 		collapseConn:     collapseConn,
@@ -303,38 +303,76 @@ func (s *OrchestratorService) executeValidationJob(ctx context.Context, job *Job
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	// Build validation request
-	req := &validationpb.TrainCascadeRequest{
+	// Build cascade request using new unified proto
+	req := &synthospb.CascadeRequest{
 		JobId:       job.ID,
-		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &validationpb.CascadeConfig{
+		DatasetId:   job.Payload["dataset_id"],
+		SampleS3Path: job.Payload["dataset_path"],
+		Config: &synthospb.CascadeConfig{
 			NumEpochs:    5,
 			BatchSize:    32,
 			LearningRate: 0.001,
 			UseMultiGpu:  false,
 			NumGpus:      1,
-			Tiers:        []string{"light", "medium", "heavy"},
+			Tiers: []*synthospb.ModelTier{
+				{TierNumber: 1, TierName: "light", ModelSize: 1000000},
+				{TierNumber: 2, TierName: "medium", ModelSize: 10000000},
+				{TierNumber: 3, TierName: "heavy", ModelSize: 100000000},
+			},
 		},
 	}
 
-	// Call validation service
-	resp, err := s.validationClient.TrainCascade(ctx, req)
+	// Call validation service - TrainCascade is now a streaming RPC
+	stream, err := s.validationClient.TrainCascade(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("validation service error: %w", err)
 	}
 
-	if resp.Status == "failed" {
-		return nil, fmt.Errorf("validation failed: %s", resp.ErrorMessage)
+	// Collect streaming results
+	var lastProgress *synthospb.CascadeProgress
+	var totalModelsCompleted int32
+	var bestAccuracy float64
+	var bestModel string
+
+	for {
+		progress, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stream error: %w", err)
+		}
+
+		lastProgress = progress
+		totalModelsCompleted = progress.ModelsCompleted
+
+		// Track best model
+		if progress.Result != nil && progress.Result.ValidationAccuracy > bestAccuracy {
+			bestAccuracy = progress.Result.ValidationAccuracy
+			bestModel = progress.Result.ModelName
+		}
+
+		// Check for errors
+		if progress.Status == "failed" && progress.Error != nil {
+			return nil, fmt.Errorf("validation failed: %s", progress.Error.Message)
+		}
+
+		log.Printf("Cascade progress: tier %d, variant %d, %d/%d models (%.1f%%)",
+			progress.CurrentTier, progress.CurrentVariant,
+			progress.ModelsCompleted, progress.ModelsTotal, progress.ProgressPercent)
 	}
 
 	// Build result
 	result := map[string]string{
-		"status":           resp.Status,
-		"job_id":           resp.JobId,
-		"average_accuracy": fmt.Sprintf("%.4f", resp.Metrics.AverageAccuracy),
-		"best_accuracy":    fmt.Sprintf("%.4f", resp.Metrics.BestAccuracy),
-		"best_model":       resp.Metrics.BestModel,
+		"status":           "completed",
+		"job_id":           job.ID,
+		"models_completed": fmt.Sprintf("%d", totalModelsCompleted),
+		"best_accuracy":    fmt.Sprintf("%.4f", bestAccuracy),
+		"best_model":       bestModel,
+	}
+
+	if lastProgress != nil {
+		result["final_progress"] = fmt.Sprintf("%.1f%%", lastProgress.ProgressPercent)
 	}
 
 	log.Printf("Validation job %s completed successfully", job.ID)
@@ -351,12 +389,12 @@ func (s *OrchestratorService) executeCollapseJob(ctx context.Context, job *Job) 
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	// Build collapse detection request
-	req := &collapsepb.DetectCollapseRequest{
+	// Build collapse detection request using new unified proto
+	req := &synthospb.CollapseRequest{
 		JobId:       job.ID,
+		DatasetId:   job.Payload["dataset_id"],
 		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &collapsepb.CollapseConfig{
+		Config: &synthospb.CollapseConfig{
 			ChunkSize: 10000,
 			UseGpu:    true,
 			NumGpus:   1,
@@ -374,17 +412,17 @@ func (s *OrchestratorService) executeCollapseJob(ctx context.Context, job *Job) 
 		return nil, fmt.Errorf("collapse service error: %w", err)
 	}
 
-	if resp.ErrorMessage != "" {
-		return nil, fmt.Errorf("collapse detection failed: %s", resp.ErrorMessage)
+	if resp.Error != nil && resp.Error.Message != "" {
+		return nil, fmt.Errorf("collapse detection failed: %s", resp.Error.Message)
 	}
 
 	// Build result
 	result := map[string]string{
 		"job_id":            resp.JobId,
-		"overall_score":     fmt.Sprintf("%.2f", resp.Score.OverallScore),
-		"collapse_detected": fmt.Sprintf("%t", resp.Score.CollapseDetected),
-		"severity":          resp.Score.Severity,
-		"collapse_type":     resp.Score.CollapseType,
+		"overall_score":     fmt.Sprintf("%.2f", resp.OverallScore),
+		"collapse_detected": fmt.Sprintf("%t", resp.CollapseDetected),
+		"severity":          resp.Severity,
+		"collapse_type":     resp.CollapseType,
 	}
 
 	log.Printf("Collapse detection job %s completed successfully", job.ID)
@@ -441,17 +479,12 @@ func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, j
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	req := &validationpb.AnalyzeDiversityRequest{
-		JobId:       job.ID,
-		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &validationpb.DiversityConfig{
-			TargetSampleSize:         10000,
-			ConfidenceLevel:          0.95,
-			ChunkSize:                10000,
-			EnableAutoStratification: true,
-			MaxStrata:                10,
-		},
+	// Build diversity request using new unified proto
+	req := &synthospb.DiversityRequest{
+		JobId:     job.ID,
+		DatasetId: job.Payload["dataset_id"],
+		S3Path:    job.Payload["dataset_path"],
+		Format:    synthospb.DataFormat_CSV, // Default to CSV
 	}
 
 	resp, err := s.validationClient.AnalyzeDiversity(ctx, req)
@@ -460,14 +493,17 @@ func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, j
 	}
 
 	if resp.Status == "failed" {
-		return nil, fmt.Errorf("diversity analysis failed: %s", resp.ErrorMessage)
+		if resp.Error != nil {
+			return nil, fmt.Errorf("diversity analysis failed: %s", resp.Error.Message)
+		}
+		return nil, fmt.Errorf("diversity analysis failed")
 	}
 
 	result := map[string]string{
 		"status":        resp.Status,
-		"overall_score": fmt.Sprintf("%.2f", resp.Score.OverallScore),
-		"spread_score":  fmt.Sprintf("%.2f", resp.Score.SpreadScore),
-		"balance_score": fmt.Sprintf("%.2f", resp.Score.BalanceScore),
+		"overall_score": fmt.Sprintf("%.2f", resp.Metrics.OverallScore),
+		"spread_score":  fmt.Sprintf("%.2f", resp.Metrics.SpreadScore),
+		"balance_score": fmt.Sprintf("%.2f", resp.Metrics.BalanceScore),
 	}
 
 	return result, nil
@@ -482,22 +518,25 @@ func (s *OrchestratorService) executeCollapseLocalizationJob(ctx context.Context
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	// This would use previous collapse detection results
-	// For now, simplified implementation
-	req := &collapsepb.LocalizeCollapseRequest{
+	// Build localization request using new unified proto
+	req := &synthospb.LocalizationRequest{
 		JobId:       job.ID,
+		DatasetId:   job.Payload["dataset_id"],
 		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &collapsepb.LocalizationConfig{
+		Config: &synthospb.LocalizationConfig{
 			ChunkSize:   10000,
 			TopKRegions: 10,
 			UseGpu:      true,
 		},
 	}
 
-	resp, err := s.collapseClient.LocalizeCollapse(ctx, req)
+	resp, err := s.collapseClient.LocalizeProblems(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("localization error: %w", err)
+	}
+
+	if resp.Error != nil && resp.Error.Message != "" {
+		return nil, fmt.Errorf("localization failed: %s", resp.Error.Message)
 	}
 
 	result := map[string]string{
@@ -517,11 +556,12 @@ func (s *OrchestratorService) executeRecommendationsJob(ctx context.Context, job
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	// This would use previous collapse detection and localization results
-	req := &collapsepb.RecommendationsRequest{
+	// Build recommendations request using new unified proto
+	req := &synthospb.RecommendationRequest{
 		JobId:       job.ID,
+		DatasetId:   job.Payload["dataset_id"],
 		DatasetPath: job.Payload["dataset_path"],
-		Config: &collapsepb.RecommendationConfig{
+		Config: &synthospb.RecommendationConfig{
 			MaxRecommendations:        5,
 			IncludeImpactEstimates:    true,
 			IncludeImplementationCode: true,
@@ -531,6 +571,10 @@ func (s *OrchestratorService) executeRecommendationsJob(ctx context.Context, job
 	resp, err := s.collapseClient.GenerateRecommendations(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("recommendations error: %w", err)
+	}
+
+	if resp.Error != nil && resp.Error.Message != "" {
+		return nil, fmt.Errorf("recommendations failed: %s", resp.Error.Message)
 	}
 
 	result := map[string]string{
