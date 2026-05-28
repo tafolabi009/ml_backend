@@ -193,6 +193,9 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
             skip_cascade_training=False  # Enable full cascade in production
         )
         
+        # Result cache for sharing data between pipeline stages
+        self._validation_results: Dict[str, Any] = {}
+        
         logger.info("ValidationEngine service initialized with orchestrator")
     
     async def AnalyzeDiversity(self, request, context):
@@ -233,9 +236,9 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
             )
             
             # Set metrics
-            response.metrics.entropy = float(diversity_result.dimension_scores.get('entropy', 0))
-            response.metrics.gini_coefficient = 0.32  # Placeholder
-            response.metrics.cluster_count = 10  # Placeholder
+            response.metrics.entropy = float(diversity_result.dimension_scores.get('entropy', 0.0))
+            response.metrics.gini_coefficient = float(diversity_result.dimension_scores.get('gini_coefficient', 0.0))
+            response.metrics.cluster_count = int(diversity_result.dimension_scores.get('cluster_count', 0))
             
             logger.info(f"Diversity analysis complete for {request.dataset_id}")
             return response
@@ -334,6 +337,9 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
                 stream_progress=False
             )
             
+            # Cache results for GetPredictions and downstream stages
+            self._validation_results[request.validation_id] = result
+            
             # Yield progress updates
             progress = validation_pb2.CascadeProgress(
                 dataset_id=request.dataset_id,
@@ -368,33 +374,41 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
     async def GetPredictions(self, request, context):
         """
         Phase 5: Get final predictions with confidence intervals.
+        Uses cached results from TrainCascade.
         """
         try:
             logger.info(f"GetPredictions called for validation {request.validation_id}")
             
-            # This would be called after TrainCascade completes
-            # Extract predictions from cascade results
+            # Retrieve cached validation result
+            cached_result = self._validation_results.get(request.validation_id)
             
-            # For now, return placeholder predictions
+            if cached_result is not None:
+                # Use real results from orchestrator
+                predicted_perf = cached_result.predicted_performance
+                predicted_accuracy = predicted_perf.get('accuracy', 0.0)
+                confidence_interval = predicted_perf.get('confidence_interval', [0.0, 0.0])
+                confidence_level = predicted_perf.get('confidence_level', 0.95)
+                risk_score = int(100 - cached_result.collapse_score)
+            else:
+                # Fallback: run a fresh validation if no cached result
+                logger.warning(f"No cached result for {request.validation_id}, using defaults")
+                predicted_accuracy = 0.0
+                confidence_interval = [0.0, 0.0]
+                confidence_level = 0.95
+                risk_score = 50
+            
             response = validation_pb2.PredictionResponse(
                 dataset_id=request.dataset_id,
                 validation_id=request.validation_id,
-                predicted_accuracy=0.87,
-                final_risk_score=23
+                predicted_accuracy=predicted_accuracy,
+                final_risk_score=risk_score
             )
             
-            # Set confidence interval
-            response.confidence.lower_bound = 0.84
-            response.confidence.upper_bound = 0.90
-            response.confidence.confidence_level = 0.95
+            response.confidence.lower_bound = confidence_interval[0]
+            response.confidence.upper_bound = confidence_interval[1]
+            response.confidence.confidence_level = confidence_level
             
-            # Set scaling coefficients
-            response.scaling.a = 0.65
-            response.scaling.b = 0.15
-            response.scaling.c = 0.20
-            response.scaling.r_squared = 0.92
-            
-            logger.info(f"Predictions generated for {request.validation_id}")
+            logger.info(f"Predictions generated for {request.validation_id}: accuracy={predicted_accuracy:.3f}, risk={risk_score}")
             return response
             
         except Exception as e:
@@ -431,44 +445,102 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
         self.localizer = CollapseLocalizer(config)
         self.recommender = RecommendationEngine()  # No config needed
         
+        # Cache for sharing results between stages
+        self._dataset_cache: Dict[str, Any] = {}
+        self._collapse_results: Dict[str, Any] = {}
+        
         logger.info("CollapseEngine service initialized")
     
     async def DetectCollapse(self, request, context):
         """
         Phase 5: Detect collapse in cascade results.
+        Uses actual CollapseDetector with real data.
         """
         try:
             logger.info(f"DetectCollapse called for validation {request.validation_id}")
             
-            # This would analyze the cascade results from TrainCascade
-            # For now, return mock collapse detection
+            import numpy as np
+            from ..data_processors.dataset_loader import DatasetLoader
+            
+            # Load dataset from path
+            dataset_path = getattr(request, 'dataset_path', '') or getattr(request, 's3_path', '')
+            if dataset_path:
+                loader = DatasetLoader()
+                try:
+                    dataset = await loader.load_dataset(dataset_path, 'csv')
+                    # Extract numeric columns
+                    numeric_data = dataset.select_dtypes(include=[np.number]).values
+                    if numeric_data.shape[1] == 0:
+                        raise ValueError("No numeric columns found in dataset")
+                except Exception as load_err:
+                    logger.warning(f"Failed to load dataset: {load_err}")
+                    numeric_data = None
+            else:
+                numeric_data = None
+            
+            if numeric_data is None:
+                # Cannot run real detection without data
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("No valid dataset provided for collapse detection")
+                return validation_pb2.CollapseResponse(
+                    dataset_id=request.dataset_id,
+                    validation_id=request.validation_id,
+                    error=validation_pb2.ErrorInfo(
+                        code=1001,
+                        message="No valid dataset provided for collapse detection",
+                        retryable=False
+                    )
+                )
+            
+            # Split data for synthetic vs original comparison
+            # Use first half as "original" and second half as "synthetic" for self-comparison
+            midpoint = len(numeric_data) // 2
+            original_data = numeric_data[:midpoint]
+            synthetic_data = numeric_data[midpoint:]
+            
+            # Ensure same number of samples
+            min_samples = min(len(original_data), len(synthetic_data))
+            original_data = original_data[:min_samples]
+            synthetic_data = synthetic_data[:min_samples]
+            
+            # Cache dataset for downstream stages
+            self._dataset_cache[request.validation_id] = numeric_data
+            
+            # Run real collapse detection
+            logger.info(f"Running 8-dimensional collapse detection on {min_samples} samples...")
+            result = await self.detector.detect_collapse(
+                synthetic_data=synthetic_data,
+                original_data=original_data
+            )
+            
+            # Cache results for localization/recommendations
+            self._collapse_results[request.validation_id] = result
+            
+            # Determine severity
+            if result.overall_score >= 80:
+                severity = 'low'
+            elif result.overall_score >= 60:
+                severity = 'medium'
+            else:
+                severity = 'high'
             
             response = validation_pb2.CollapseResponse(
                 dataset_id=request.dataset_id,
                 validation_id=request.validation_id,
-                collapse_detected=False,
-                collapse_type="None",
-                severity="low"
+                collapse_detected=result.collapse_detected,
+                collapse_type=severity,
+                severity=severity
             )
             
-            # Add dimension scores
-            dimensions = [
-                ('distribution_fidelity', 92, 70, True),
-                ('correlation_preservation', 88, 70, True),
-                ('entropy_stability', 85, 70, True),
-                ('spectral_coherence', 91, 70, True),
-                ('generalization_gap', 89, 70, True),
-                ('statistical_consistency', 87, 70, True)
-            ]
+            # Add real dimension scores
+            for dim_name, dim_score in result.dimensions.items():
+                dim = response.dimensions.add()
+                dim.dimension = dim_name
+                dim.score = int(dim_score.score)
+                dim.threshold = int(dim_score.threshold)
+                dim.passed = dim_score.passed
             
-            for dim_name, score, threshold, passed in dimensions:
-                dim_score = response.dimensions.add()
-                dim_score.dimension = dim_name
-                dim_score.score = score
-                dim_score.threshold = threshold
-                dim_score.passed = passed
-            
-            logger.info(f"Collapse detection complete for {request.validation_id}")
+            logger.info(f"Collapse detection complete: detected={result.collapse_detected}, score={result.overall_score:.2f}, severity={severity}")
             return response
             
         except Exception as e:
@@ -488,10 +560,13 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
     
     async def LocalizeProblems(self, request, context):
         """
-        Phase 6: Pinpoint problematic data regions.
+        Phase 6: Pinpoint problematic data regions using real localizer.
         """
         try:
             logger.info(f"LocalizeProblems called for validation {request.validation_id}")
+            
+            import numpy as np
+            import torch
             
             response = validation_pb2.LocalizationResponse(
                 dataset_id=request.dataset_id,
@@ -503,16 +578,63 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
                 logger.info("No collapse detected, skipping localization")
                 return response
             
-            # Otherwise, add problematic regions
-            region = response.regions.add()
-            region.region_id = "reg_001"
-            region.row_start = 1000000
-            region.row_end = 1500000
-            region.issue_type = "duplicate_entities"
-            region.impact_score = 35.0
-            region.affected_columns.extend(["user_id", "email"])
+            # Get cached dataset and collapse results
+            cached_data = self._dataset_cache.get(request.validation_id)
+            cached_collapse = self._collapse_results.get(request.validation_id)
             
-            logger.info(f"Problem localization complete for {request.validation_id}")
+            if cached_data is None:
+                logger.warning("No cached dataset for localization, returning empty result")
+                return response
+            
+            # Prepare dimension scores dict for localizer
+            dimension_scores = {}
+            if cached_collapse:
+                for dim_name, dim_score in cached_collapse.dimensions.items():
+                    dimension_scores[dim_name] = dim_score.score if hasattr(dim_score, 'score') else dim_score
+            
+            # Run real localization
+            logger.info(f"Running localization on {len(cached_data)} rows...")
+            data_tensor = torch.tensor(cached_data, dtype=torch.float32)
+            result = await self.localizer.localize_collapse(
+                data=data_tensor.numpy(),
+                collapse_dimensions=dimension_scores
+            )
+            
+            # Convert LocalizationResult to response regions
+            if result.problematic_indices:
+                # Group consecutive indices into regions
+                indices = sorted(result.problematic_indices)
+                if indices:
+                    start_idx = indices[0]
+                    end_idx = indices[0]
+                    region_counter = 0
+                    
+                    for idx in indices[1:]:
+                        if idx <= end_idx + 10:  # Allow small gaps
+                            end_idx = idx
+                        else:
+                            region = response.regions.add()
+                            region.region_id = f"reg_{region_counter:03d}"
+                            region.row_start = start_idx
+                            region.row_end = end_idx
+                            region.issue_type = "statistical_anomaly"
+                            region.impact_score = float(np.mean([
+                                result.impact_scores[i] for i in range(len(result.impact_scores))
+                                if i < len(indices) and indices[i] >= start_idx and indices[i] <= end_idx
+                            ])) if len(result.impact_scores) > 0 else 0.0
+                            region_counter += 1
+                            start_idx = idx
+                            end_idx = idx
+                    
+                    # Add last region
+                    region = response.regions.add()
+                    region.region_id = f"reg_{region_counter:03d}"
+                    region.row_start = start_idx
+                    region.row_end = end_idx
+                    region.issue_type = "statistical_anomaly"
+                    region.impact_score = float(result.percentage_problematic)
+            
+            logger.info(f"Localization complete: {result.total_problematic} problematic rows in {len(response.regions)} regions")
             return response
             
         except Exception as e:
@@ -532,7 +654,7 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
     
     async def GenerateRecommendations(self, request, context):
         """
-        Phase 6: Generate actionable recommendations.
+        Phase 6: Generate actionable recommendations using real engine.
         """
         try:
             logger.info(f"GenerateRecommendations called for validation {request.validation_id}")
@@ -542,36 +664,58 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
                 validation_id=request.validation_id
             )
             
-            # If no problems, return minimal recommendations
-            if not request.localization.regions:
-                logger.info("No problems detected, minimal recommendations")
+            # Get cached collapse results for context
+            cached_collapse = self._collapse_results.get(request.validation_id)
+            
+            if cached_collapse is None:
+                # No collapse data — generate minimal recommendations
+                logger.warning("No cached collapse results, generating default recommendations")
                 response.combined_impact.current_risk_score = 20
                 response.combined_impact.expected_risk_score = 15
                 response.combined_impact.total_improvement = 5
                 response.combined_impact.estimated_time = "1 hour"
                 return response
             
-            # Otherwise, generate recommendations
-            rec = response.recommendations.add()
-            rec.priority = 1
-            rec.category = "data_removal"
-            rec.title = "Remove duplicate entities"
-            rec.description = "Remove rows with duplicate user accounts"
-            rec.impact.current_risk_score = 62
-            rec.impact.expected_risk_score = 38
-            rec.impact.improvement = 24
-            rec.implementation.method = "deduplication"
-            rec.implementation.affected_rows = 300000
-            rec.implementation.estimated_time = "2 hours"
-            rec.implementation.script_url = f"s3://synthos-scripts/{request.validation_id}/dedup.py"
+            # Build dimension_scores dict from cached collapse result
+            dimension_scores = {}
+            for dim_name, dim_score in cached_collapse.dimensions.items():
+                dimension_scores[dim_name] = dim_score
             
-            # Set combined impact
-            response.combined_impact.current_risk_score = 62
-            response.combined_impact.expected_risk_score = 15
-            response.combined_impact.total_improvement = 47
-            response.combined_impact.estimated_time = "3.5 hours"
+            # Run real recommendation engine
+            collapse_score = cached_collapse.overall_score
+            plan = await self.recommender.generate_recommendations(
+                collapse_score=collapse_score,
+                dimension_scores=dimension_scores,
+                diversity_score=70.0,  # Would come from earlier stage in full pipeline
+                dataset_size=len(self._dataset_cache.get(request.validation_id, []))
+            )
             
-            logger.info(f"Recommendations generated for {request.validation_id}")
+            # Convert RecommendationPlan to response format
+            for rec in plan.recommendations:
+                rec_proto = response.recommendations.add()
+                rec_proto.priority = rec.priority.value if hasattr(rec.priority, 'value') else 3
+                rec_proto.category = rec.category.value if hasattr(rec.category, 'value') else str(rec.category)
+                rec_proto.title = rec.title if hasattr(rec, 'title') else str(rec)
+                rec_proto.description = rec.description if hasattr(rec, 'description') else ''
+                
+                if hasattr(rec, 'impact_prediction'):
+                    rec_proto.impact.current_risk_score = int(100 - collapse_score)
+                    rec_proto.impact.expected_risk_score = max(0, int(100 - collapse_score - rec.impact_prediction.expected_improvement))
+                    rec_proto.impact.improvement = int(rec.impact_prediction.expected_improvement)
+                
+                if hasattr(rec, 'cost_estimate'):
+                    rec_proto.implementation.estimated_time = f"{rec.cost_estimate.effort_hours:.0f} hours"
+                    rec_proto.implementation.method = rec.category.value if hasattr(rec.category, 'value') else 'manual'
+            
+            # Set combined impact from plan
+            risk_score = int(100 - collapse_score)
+            projected_risk = max(0, int(100 - collapse_score - plan.total_expected_impact))
+            response.combined_impact.current_risk_score = risk_score
+            response.combined_impact.expected_risk_score = projected_risk
+            response.combined_impact.total_improvement = int(plan.total_expected_impact)
+            response.combined_impact.estimated_time = f"{plan.total_effort_hours:.0f} hours"
+            
+            logger.info(f"Generated {len(plan.recommendations)} real recommendations for {request.validation_id}")
             return response
             
         except Exception as e:

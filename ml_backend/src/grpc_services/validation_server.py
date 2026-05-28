@@ -159,6 +159,7 @@ class ValidationEngineServicer:  # Will inherit from validation_pb2_grpc.Validat
         self.config = config
         self.hardware_config = hardware_config
         self.dataset_loader = DatasetLoader()
+        self._cascade_results = {}  # Cache cascade results for GetPredictions
         logger.info("ValidationEngine service initialized")
     
     @handle_errors
@@ -332,10 +333,8 @@ class ValidationEngineServicer:  # Will inherit from validation_pb2_grpc.Validat
             logger.info(f"Loaded {len(train_data):,} training samples, {len(val_data):,} validation samples")
             
         except Exception as e:
-            logger.warning(f"Failed to load from S3: {e}. Using synthetic data for testing.")
-            import torch
-            train_data = torch.randint(0, 50257, (1_000_000,))  # Smaller for testing
-            val_data = torch.randint(0, 50257, (50_000,))
+            logger.error(f"Failed to load dataset from {request.sample_s3_path}: {e}")
+            raise DataError(f"Failed to load training data: {e}. Cannot proceed with random data.")
         
         # Train cascade (will stream progress every 10s)
         try:
@@ -344,6 +343,37 @@ class ValidationEngineServicer:  # Will inherit from validation_pb2_grpc.Validat
                 val_data=val_data,
                 vocab_size=request.config.vocab_size
             )
+            
+            
+            # Caching the cascade training results for GetPredictions
+            import numpy as np
+            if results and len(results) > 0:
+                valid_models = [r for r in results if not r.collapse_detected]
+                if not valid_models:
+                    valid_models = results
+                best_model = min(valid_models, key=lambda r: r.validation_loss)
+                val_loss = best_model.validation_loss
+                predicted_accuracy = min(0.98, max(0.1, float(np.exp(-val_loss))))
+                
+                num_collapsed = sum(1 for r in results if r.collapse_detected)
+                collapse_pct = num_collapsed / len(results)
+                final_risk_score = int(collapse_pct * 100)
+                
+                margin = 0.03
+                lower_bound = max(0.0, predicted_accuracy - margin)
+                upper_bound = min(1.0, predicted_accuracy + margin)
+            else:
+                predicted_accuracy = 0.75
+                lower_bound = 0.72
+                upper_bound = 0.78
+                final_risk_score = 50
+            
+            self._cascade_results[request.validation_id] = {
+                'predicted_accuracy': predicted_accuracy,
+                'lower_bound': lower_bound,
+                'upper_bound': upper_bound,
+                'risk_score': final_risk_score
+            }
             
             # Send final completion message
             yield {
@@ -383,23 +413,19 @@ class ValidationEngineServicer:  # Will inherit from validation_pb2_grpc.Validat
             # Power law scaling: accuracy = a * (compute)^b
             # Simplified model based on cascade tier performance
             
-            # Baseline accuracy from cascade training
-            base_accuracy = 0.75  # Typical for tiny models
-            
-            # Scaling factor based on target model size
-            # Assume target is 10x larger than base tier
-            scaling_factor = 0.12  # Empirical scaling coefficient
-            
-            predicted_accuracy = min(0.95, base_accuracy + scaling_factor)
-            
-            # Confidence intervals (±3% typical for well-calibrated models)
-            margin = 0.03
-            lower_bound = max(0.0, predicted_accuracy - margin)
-            upper_bound = min(1.0, predicted_accuracy + margin)
-            
-            # Risk score based on predicted accuracy (inverse relationship)
-            # Higher accuracy = lower risk
-            final_risk_score = int((1 - predicted_accuracy) * 100)
+            # Get predictions from stored cascade results if available
+            if hasattr(self, '_cascade_results') and request.validation_id in self._cascade_results:
+                cached = self._cascade_results[request.validation_id]
+                predicted_accuracy = cached.get('predicted_accuracy', 0.0)
+                lower_bound = cached.get('lower_bound', 0.0)
+                upper_bound = cached.get('upper_bound', 0.0)
+                final_risk_score = cached.get('risk_score', 50)
+            else:
+                logger.warning(f"No cached cascade results for {request.validation_id}")
+                predicted_accuracy = 0.0
+                lower_bound = 0.0
+                upper_bound = 0.0
+                final_risk_score = 50  # Unknown risk
             
             logger.info(f"Predictions: accuracy={predicted_accuracy:.3f}, risk={final_risk_score}")
             
@@ -470,11 +496,27 @@ class CollapseEngineServicer:  # Will inherit from validation_pb2_grpc.CollapseE
             
             logger.info(f"Loading datasets for collapse detection...")
             
-            # Load synthetic data (generated from model)
-            synthetic_data = np.random.randn(10000, 100)  # Placeholder
-            
-            # Load original data
-            original_data = np.random.randn(10000, 100)  # Placeholder
+            # Load real dataset from request path
+            dataset_path = getattr(request, 'dataset_path', '') or getattr(request, 's3_path', '')
+            if dataset_path:
+                loader = DatasetLoader()
+                try:
+                    dataset = await loader.load_dataset(dataset_path, 'csv')
+                    numeric_data = dataset.select_dtypes(include=[np.number]).values
+                    if numeric_data.shape[1] == 0:
+                        raise ValueError("No numeric columns found")
+                    # Split data for comparison (first half vs second half)
+                    midpoint = len(numeric_data) // 2
+                    original_data = numeric_data[:midpoint]
+                    synthetic_data = numeric_data[midpoint:]
+                    min_samples = min(len(original_data), len(synthetic_data))
+                    original_data = original_data[:min_samples]
+                    synthetic_data = synthetic_data[:min_samples]
+                except Exception as load_err:
+                    logger.error(f"Failed to load dataset for collapse detection: {load_err}")
+                    raise DataError(f"Failed to load dataset: {load_err}")
+            else:
+                raise DataError("No dataset path provided for collapse detection")
             
             # Run collapse detection
             logger.info("Running 8-dimensional collapse detection...")
@@ -539,8 +581,16 @@ class CollapseEngineServicer:  # Will inherit from validation_pb2_grpc.CollapseE
             
             logger.info("Running gradient-based localization...")
             
-            # Load dataset (in production, from S3/GCS)
-            dataset = torch.randn(10000, 100)  # Placeholder
+            # Load real dataset
+            dataset_path = getattr(request, 'dataset_path', '') or getattr(request, 's3_path', '')
+            if dataset_path:
+                loader = DatasetLoader()
+                df = await loader.load_dataset(dataset_path, 'csv')
+                import numpy as np
+                numeric_data = df.select_dtypes(include=[np.number]).values
+                dataset = torch.tensor(numeric_data, dtype=torch.float32)
+            else:
+                raise DataError("No dataset path provided for localization")
             
             # Get collapse dimensions from request or previous detection
             collapse_dimensions = {}  # Would come from DetectCollapse result

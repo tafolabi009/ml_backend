@@ -269,8 +269,21 @@ class ValidationResult:
     
     def save_report(self, output_path: str):
         """Save validation report to JSON file."""
+        import numpy as np
+        class NpEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.bool_):
+                    return bool(obj)
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                if isinstance(obj, np.floating):
+                    return float(obj)
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return super().default(obj)
+                
         with open(output_path, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(self.to_dict(), f, indent=2, cls=NpEncoder)
         logger.info(f"📄 Validation report saved to: {output_path}")
 
 
@@ -677,9 +690,22 @@ class SynthosOrchestrator:
                 print(f"\n   Top 3 Recommendations:")
                 for i, rec in enumerate(recommendations[:3], 1):
                     # rec might be a Recommendation object or dict
-                    title = rec.title if hasattr(rec, 'title') else rec.get('title', 'Unknown')
-                    impact = rec.estimated_impact if hasattr(rec, 'estimated_impact') else rec.get('estimated_impact', 0)
-                    cost = rec.cost_usd if hasattr(rec, 'cost_usd') else rec.get('cost_usd', 0)
+                    if isinstance(rec, dict):
+                        title = rec.get('title', 'Unknown')
+                        impact = rec.get('estimated_impact', 0.0)
+                        cost = rec.get('cost_usd', 0.0)
+                    else:
+                        title = getattr(rec, 'title', 'Unknown')
+                        if hasattr(rec, 'impact_prediction') and hasattr(rec.impact_prediction, 'expected_improvement'):
+                            impact = rec.impact_prediction.expected_improvement
+                        else:
+                            impact = getattr(rec, 'estimated_impact', 0.0)
+                        
+                        if hasattr(rec, 'cost_estimate') and hasattr(rec.cost_estimate, 'get_total_usd'):
+                            cost = rec.cost_estimate.get_total_usd()
+                        else:
+                            cost = getattr(rec, 'cost_usd', 0.0)
+                    
                     print(f"   {i}. {title}")
                     print(f"      Impact: +{impact:.1f} points | Cost: ${cost:,.0f}")
             print(f"\n   Projected Improvement: +{projected_improvement:.1f} points")
@@ -877,7 +903,16 @@ class SynthosOrchestrator:
             print(f"\n🔧 Next Steps:")
             print(f"   1. Review recommendations (top 3):")
             for i, rec in enumerate(result.recommendations[:3], 1):
-                print(f"      {i}. {rec['title']} (+{rec['estimated_impact']:.1f} pts)")
+                if isinstance(rec, dict):
+                    title = rec.get('title', 'Unknown')
+                    impact = rec.get('estimated_impact', 0.0)
+                else:
+                    title = getattr(rec, 'title', 'Unknown')
+                    if hasattr(rec, 'impact_prediction') and hasattr(rec.impact_prediction, 'expected_improvement'):
+                        impact = rec.impact_prediction.expected_improvement
+                    else:
+                        impact = getattr(rec, 'estimated_impact', 0.0)
+                print(f"      {i}. {title} (+{impact:.1f} pts)")
             print(f"   2. Fix identified issues")
             print(f"   3. Re-run validation")
         

@@ -22,13 +22,17 @@ import validation_pb2_grpc
 from validation_engine.cascade_trainer import CascadeTrainer
 from validation_engine.diversity_analyzer import DiversityAnalyzer, StratificationConfig
 
+# Create log directory before configuring logging
+log_dir = os.getenv('LOG_DIR', os.path.dirname(__file__))
+os.makedirs(log_dir, exist_ok=True)
+
 # Structured logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - trace_id=%(trace_id)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('/var/log/validation-service.log')
+        logging.FileHandler(os.path.join(log_dir, 'validation-service.log'))
     ]
 )
 logger = logging.getLogger(__name__)
@@ -151,11 +155,32 @@ class ValidationServiceServicer(validation_pb2_grpc.ValidationServiceServicer):
                 config = StratificationConfig()
                 self.diversity_analyzer = DiversityAnalyzer(config)
             
-            # Run analysis
-            # This is a placeholder - in production you'd load and analyze the dataset
+            # Load and analyze the actual dataset
+            dataset_path = request.dataset_path
+            dataset_format = getattr(request, 'data_format', 'csv') or 'csv'
+            
+            if not dataset_path:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("dataset_path is required for diversity analysis")
+                return validation_pb2.AnalyzeDiversityResponse(diversity_score=0.0)
+            
+            # Run real diversity analysis
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            diversity_result = loop.run_until_complete(
+                self.diversity_analyzer.analyze_diversity(dataset_path, dataset_format)
+            )
+            
+            # Extract real metrics
+            real_score = float(diversity_result.overall_score) / 100.0  # Normalize to 0-1
+            real_metrics = {
+                'overall_score': float(diversity_result.overall_score),
+                'dimension_scores': {k: float(v) for k, v in diversity_result.dimension_scores.items()}
+            }
+            
             return validation_pb2.AnalyzeDiversityResponse(
-                diversity_score=0.85,
-                metrics=json.dumps({'feature_coverage': 0.9, 'class_balance': 0.8})
+                diversity_score=real_score,
+                metrics=json.dumps(real_metrics)
             )
         except Exception as e:
             logger.error(f"AnalyzeDiversity failed: {e}", extra={'trace_id': trace_id}, exc_info=True)
@@ -184,7 +209,8 @@ def serve():
     port = os.getenv('GRPC_PORT', '50051')
     
     # Create log directory
-    os.makedirs('/var/log', exist_ok=True)
+    log_dir = os.getenv('LOG_DIR', os.path.dirname(__file__))
+    os.makedirs(log_dir, exist_ok=True)
     
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
