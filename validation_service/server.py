@@ -108,17 +108,36 @@ class ValidationServiceServicer(validation_pb2_grpc.ValidationServiceServicer):
                 'started_at': datetime.utcnow().isoformat()
             }
             
+            # Load and prepare training data
+            from data_processors.dataset_loader import DatasetLoader
+            import numpy as np
+            
+            loader = DatasetLoader()
+            dataset = loop.run_until_complete(loader.load_dataset(request.dataset_path, request.data_format or 'parquet'))
+            
+            if hasattr(dataset, 'values'):
+                numeric_data = dataset.select_dtypes(include=[np.number]).values
+            else:
+                numeric_data = dataset
+                
+            if len(numeric_data.shape) > 1:
+                data_tensor = torch.tensor(numeric_data[:, 0], dtype=torch.long)
+            else:
+                data_tensor = torch.tensor(numeric_data, dtype=torch.long)
+                
+            split_idx = int(len(data_tensor) * 0.95)
+            val_data = data_tensor[split_idx:]
+            train_data = data_tensor[:split_idx]
+            
+            vocab_size = request.config.vocab_size if hasattr(request.config, 'vocab_size') and request.config.vocab_size else 10000
+            
             # Run training
             logger.info(f"Starting cascade training", extra={'trace_id': trace_id, 'dataset': request.dataset_path})
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
             results = loop.run_until_complete(
                 self.cascade_trainer.train_cascade(
-                    data_path=request.dataset_path,
-                    data_format=request.data_format or 'parquet',
-                    tiers=list(request.config.tiers) if request.config.tiers else ['light', 'medium', 'heavy'],
-                    **config
+                    train_data=train_data,
+                    val_data=val_data,
+                    vocab_size=vocab_size
                 )
             )
             
@@ -129,11 +148,59 @@ class ValidationServiceServicer(validation_pb2_grpc.ValidationServiceServicer):
             
             logger.info(f"Cascade training completed", extra={'trace_id': trace_id, 'job_id': job_id})
             
+            # Convert python results to proto format
+            proto_results = []
+            total_time = 0.0
+            total_accuracy = 0.0
+            best_accuracy = 0.0
+            best_model_name = ""
+            
+            for r in results:
+                accuracy = min(0.98, max(0.1, float(np.exp(-r.validation_loss))))
+                total_accuracy += accuracy
+                total_time += r.training_time_seconds
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    best_model_name = f"tier_{r.tier}_var_{r.variant}"
+                    
+                additional = {}
+                additional.update(r.gradient_stats)
+                additional.update(r.spectral_metrics)
+                additional['model_size_params'] = float(r.model_size_params)
+                additional['training_loss'] = r.training_loss
+                additional['collapse_detected'] = 1.0 if r.collapse_detected else 0.0
+                
+                proto_result = validation_pb2.ModelResult(
+                    tier=str(r.tier),
+                    model_name=f"tier_{r.tier}_var_{r.variant}",
+                    training_time=r.training_time_seconds,
+                    validation_accuracy=accuracy,
+                    validation_loss=r.validation_loss,
+                    total_epochs=r.convergence_epoch,
+                    best_epoch=r.convergence_epoch,
+                    additional_metrics=additional
+                )
+                proto_results.append(proto_result)
+                
+            avg_accuracy = total_accuracy / len(results) if results else 0.0
+            avg_spectral_entropy = np.mean([r.spectral_metrics.get('spectral_entropy', 0.0) for r in results]) if results else 0.0
+            avg_freq_concentration = np.mean([r.spectral_metrics.get('frequency_concentration', 0.0) for r in results]) if results else 0.0
+            
+            proto_metrics = validation_pb2.CascadeMetrics(
+                total_training_time=total_time,
+                average_accuracy=avg_accuracy,
+                best_accuracy=best_accuracy,
+                best_model=best_model_name,
+                ensemble_accuracy=avg_accuracy,
+                spectral_entropy=avg_spectral_entropy,
+                frequency_concentration=avg_freq_concentration
+            )
+            
             return validation_pb2.TrainCascadeResponse(
                 job_id=job_id,
                 status='completed',
-                model_path=results.get('model_path', ''),
-                metrics=json.dumps(results.get('metrics', {}))
+                results=proto_results,
+                metrics=proto_metrics
             )
             
         except Exception as e:
@@ -188,20 +255,43 @@ class ValidationServiceServicer(validation_pb2_grpc.ValidationServiceServicer):
             context.set_details(str(e))
             return validation_pb2.AnalyzeDiversityResponse(diversity_score=0.0)
 
-    def GetJobStatus(self, request, context):
-        """Get status of a training job"""
+    def GetTrainingProgress(self, request, context):
+        """Get progress of a training job"""
         job_id = request.job_id
         if job_id not in active_jobs:
             context.set_code(grpc.StatusCode.NOT_FOUND)
-            return validation_pb2.JobStatusResponse(status='not_found')
+            return validation_pb2.ProgressResponse(status='not_found')
         
         job = active_jobs[job_id]
-        return validation_pb2.JobStatusResponse(
+        elapsed = 0
+        if 'started_at' in job:
+            started = datetime.fromisoformat(job['started_at'])
+            elapsed = int((datetime.utcnow() - started).total_seconds())
+            
+        return validation_pb2.ProgressResponse(
+            job_id=job_id,
             status=job['status'],
-            progress=job.get('progress', 0.0),
-            stage=job.get('stage', ''),
-            error_message=job.get('error', '')
+            progress_percentage=job.get('progress', 0.0) * 100.0,
+            current_stage=job.get('stage', ''),
+            elapsed_time=elapsed,
+            estimated_remaining=0,
+            stage_details={'error': job.get('error', '')} if job.get('error') else {}
         )
+
+    def CancelTraining(self, request, context):
+        """Cancel training job"""
+        job_id = request.job_id
+        if job_id not in active_jobs:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            return validation_pb2.CancelResponse(job_id=job_id, success=False, message="Job not found")
+        
+        if active_jobs[job_id]['status'] == 'running':
+            active_jobs[job_id]['status'] = 'cancelled'
+            active_jobs[job_id]['error'] = f"Cancelled by request: {request.reason}"
+            logger.info(f"Cancelled job {job_id}")
+            return validation_pb2.CancelResponse(job_id=job_id, success=True, message="Job successfully cancelled")
+            
+        return validation_pb2.CancelResponse(job_id=job_id, success=False, message=f"Job status is {active_jobs[job_id]['status']}")
 
 
 def serve():

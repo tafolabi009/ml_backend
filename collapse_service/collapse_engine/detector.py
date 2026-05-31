@@ -116,11 +116,27 @@ def validate_tensor_input(
             )
         logger.warning(f"{name}: Contains {inf_count} Inf values, will be clipped")
     
-    # Check shape (must be 2D)
+    # Check shape — project higher-dimensional tensors to 2D
     if data.ndim == 1:
         data = data.reshape(-1, 1)
-    elif data.ndim != 2:
-        raise InvalidInputError("Data must be 2D", name, {"ndim": data.ndim, "shape": data.shape})
+    elif data.ndim == 3:
+        # (Batch, Seq, Embed_Dim) → (Batch, Embed_Dim) via mean pooling
+        logger.info(f"{name}: Pooling 3D tensor {data.shape} → ({data.shape[0]}, {data.shape[2]}) via mean over axis 1")
+        data = np.mean(data, axis=1)
+    elif data.ndim == 4:
+        # (Batch, Channels, H, W) → (Batch, C*H*W) via flatten
+        logger.info(f"{name}: Flattening 4D tensor {data.shape} → ({data.shape[0]}, {np.prod(data.shape[1:])})")
+        data = data.reshape(data.shape[0], -1)
+    elif data.ndim > 4:
+        # Flatten all spatial/sequence dims
+        logger.info(f"{name}: Flattening {data.ndim}D tensor {data.shape} → ({data.shape[0]}, {np.prod(data.shape[1:])})")
+        data = data.reshape(data.shape[0], -1)
+    
+    if data.ndim != 2:
+        raise InvalidInputError(
+            "Data must resolve to a 2D feature matrix after projection",
+            name, {"ndim": data.ndim, "shape": data.shape}
+        )
     
     n_samples = data.shape[0]
     
@@ -925,6 +941,78 @@ class CollapseDetector:
             severity=severity
         )
     
+    # ==================== DIMENSION 9: CROSS-MODAL ALIGNMENT (OPT-IN) ====================
+    
+    async def _analyze_cross_modal_alignment(
+        self, visual_latents: np.ndarray, text_latents: np.ndarray
+    ) -> DimensionScore:
+        """
+        Opt-in dimension: Prevents one modality from collapsing the other.
+        Measures structural similarity in the joint embedding space.
+        
+        Call this explicitly when validating multimodal training data.
+        Not wired into the default detect_collapse flow.
+        
+        Args:
+            visual_latents: Visual embeddings (N_samples, Embed_Dim)
+            text_latents: Text embeddings (N_samples, Embed_Dim)
+            
+        Returns:
+            DimensionScore with cross-modal alignment metrics
+        """
+        metrics = {}
+        
+        # Validate inputs
+        visual_latents = validate_tensor_input(visual_latents, "visual_latents", min_samples=2)
+        text_latents = validate_tensor_input(text_latents, "text_latents", min_samples=2)
+        
+        # Ensure same number of samples
+        n_samples = min(len(visual_latents), len(text_latents))
+        visual_latents = visual_latents[:n_samples]
+        text_latents = text_latents[:n_samples]
+        
+        # 1. Cross-Covariance via Frobenius norm
+        vis_tensor = torch.tensor(visual_latents, device=self.device, dtype=torch.float32)
+        txt_tensor = torch.tensor(text_latents, device=self.device, dtype=torch.float32)
+        
+        # Center the data
+        vis_norm = vis_tensor - vis_tensor.mean(dim=0)
+        txt_norm = txt_tensor - txt_tensor.mean(dim=0)
+        
+        # Cross-covariance matrix and its Frobenius norm
+        cross_cov = torch.mm(vis_norm.T, txt_norm) / (n_samples - 1)
+        alignment_score = torch.norm(cross_cov, p='fro').item()
+        metrics['cross_modal_covariance'] = alignment_score
+        
+        # 2. Modality Variance Ratio (detects if one modality is dying)
+        vis_var = torch.var(vis_tensor).item()
+        txt_var = torch.var(txt_tensor).item()
+        
+        var_ratio = min(vis_var, txt_var) / (max(vis_var, txt_var) + 1e-8)
+        metrics['variance_balance'] = var_ratio * 100
+        metrics['visual_variance'] = vis_var
+        metrics['text_variance'] = txt_var
+        
+        # 3. Cosine similarity distribution
+        vis_normed = F.normalize(vis_tensor, p=2, dim=1)
+        txt_normed = F.normalize(txt_tensor, p=2, dim=1)
+        cosine_sims = (vis_normed * txt_normed).sum(dim=1)
+        metrics['mean_cosine_similarity'] = cosine_sims.mean().item()
+        metrics['std_cosine_similarity'] = cosine_sims.std().item()
+        
+        # Score calculation
+        score = (var_ratio * 100 * 0.7) + (min(alignment_score * 10, 100) * 0.3)
+        passed = score >= 65.0
+        
+        return DimensionScore(
+            name='Cross-Modal Alignment',
+            score=score,
+            threshold=65.0,
+            passed=passed,
+            metrics=metrics,
+            severity=self._determine_severity(score, 65.0)
+        )
+
     # ==================== HELPER METHODS ====================
     
     def _create_neutral_dimension(self, name: str) -> DimensionScore:

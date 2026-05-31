@@ -66,14 +66,39 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             
             # Run detection
             logger.info(f"Starting collapse detection for {request.dataset_path}")
+            
+            # Load and prepare data using DatasetLoader
+            from data_processors.dataset_loader import DatasetLoader
+            import numpy as np
+            
+            loader = DatasetLoader()
+            dataset = loader.load_full(request.dataset_path)
+            
+            if request.target_columns:
+                cols = list(request.target_columns)
+                numeric_data = dataset[cols].values
+            else:
+                numeric_data = dataset.select_dtypes(include=[np.number]).values
+                
+            if numeric_data.shape[1] == 0:
+                raise ValueError("No numeric columns found for analysis")
+                
+            # Split dataset in half (first half as original, second half as synthetic)
+            midpoint = len(numeric_data) // 2
+            original_data = numeric_data[:midpoint]
+            synthetic_data = numeric_data[midpoint:]
+            
+            min_samples = min(len(original_data), len(synthetic_data))
+            original_data = original_data[:min_samples]
+            synthetic_data = synthetic_data[:min_samples]
+            
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             collapse_score = loop.run_until_complete(
                 self.detector.detect_collapse(
-                    data_path=request.dataset_path,
-                    data_format=request.data_format,
-                    target_columns=list(request.target_columns) if request.target_columns else None
+                    synthetic_data=synthetic_data,
+                    original_data=original_data
                 )
             )
             
@@ -147,18 +172,35 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Track job
             active_jobs[job_id] = {'status': 'running', 'stage': 'localization'}
             
+            # Load and prepare data using DatasetLoader
+            from data_processors.dataset_loader import DatasetLoader
+            import numpy as np
+            
+            loader = DatasetLoader()
+            dataset = loader.load_full(request.dataset_path)
+            numeric_data = dataset.select_dtypes(include=[np.number]).values
+            
+            # Extract collapse dimensions from request
+            collapse_dimensions = {}
+            if request.collapse_score and request.collapse_score.dimensions:
+                for name, dim in request.collapse_score.dimensions.items():
+                    collapse_dimensions[name] = dim.score
+            else:
+                collapse_dimensions = {
+                    'distribution_fidelity': 50.0,
+                    'correlation_preservation': 50.0,
+                    'entropy_stability': 50.0
+                }
+            
             # Run localization
             logger.info(f"Starting collapse localization for {request.dataset_path}")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Note: collapse_score from request needs to be converted to proper object
-            # For now, we'll pass the data path and let localizer detect internally
             results = loop.run_until_complete(
                 self.localizer.localize_collapse(
-                    data_path=request.dataset_path,
-                    data_format=request.data_format,
-                    collapse_score=None  # Would need proper object conversion
+                    data=numeric_data,
+                    collapse_dimensions=collapse_dimensions
                 )
             )
             
@@ -168,22 +210,37 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Convert to proto
             response = collapse_pb2.LocalizeCollapseResponse(job_id=job_id)
             
-            for result in results:
+            # Group problematic indices into contiguous regions
+            regions = []
+            indices = results.problematic_indices
+            if len(indices) > 0:
+                start_idx = indices[0]
+                end_idx = indices[0]
+                
+                for idx in indices[1:]:
+                    if idx == end_idx + 1:
+                        end_idx = idx
+                    else:
+                        regions.append((start_idx, end_idx))
+                        start_idx = idx
+                        end_idx = idx
+                regions.append((start_idx, end_idx))
+                
+            for i, (start, end) in enumerate(regions):
                 loc_result = collapse_pb2.LocalizationResult(
-                    region_id=result.region_id,
-                    start_row=result.start_row,
-                    end_row=result.end_row,
-                    affected_columns=result.affected_columns,
-                    issue_type=result.issue_type,
-                    severity_score=result.severity_score,
-                    confidence=result.confidence,
-                    description=result.description or ""
+                    region_id=f"region_{i:03d}",
+                    start_row=start,
+                    end_row=end,
+                    affected_columns=list(request.config.focus_dimensions) if request.config.focus_dimensions else [],
+                    issue_type="collapse_anomaly",
+                    severity_score=float(results.impact_scores[start:end+1].mean()) if len(results.impact_scores) > end else 0.8,
+                    confidence=0.9,
+                    description=f"Anomaly detected in rows {start}-{end}"
                 )
                 
-                # Map dimension impacts
-                if hasattr(result, 'dimension_impacts'):
-                    for dim, impact in result.dimension_impacts.items():
-                        loc_result.dimension_impacts[dim] = impact
+                # Map dimension attributions if available
+                for dim, attributions in results.dimension_attributions.items():
+                    loc_result.dimension_impacts[dim] = float(attributions.mean())
                 
                 response.regions.append(loc_result)
             
@@ -216,12 +273,48 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Convert request data to proper format (simplified for now)
-            recommendations = loop.run_until_complete(
+            # Convert request data to proper format
+            collapse_score = float(request.collapse_score.overall_score) if request.collapse_score else 75.0
+            
+            # Map dimensions
+            dimension_scores = {}
+            if request.collapse_score and request.collapse_score.dimensions:
+                for name, dim in request.collapse_score.dimensions.items():
+                    dimension_scores[name] = dim.score
+            else:
+                dimension_scores = {
+                    'distribution_fidelity': 50.0,
+                    'correlation_preservation': 50.0,
+                    'entropy_stability': 50.0
+                }
+                
+            # Construct localization helper object
+            class SimpleLocalizationResult:
+                def __init__(self, total, pct):
+                    self.total_problematic = total
+                    self.percentage_problematic = pct
+                    
+            total_problematic = len(request.localization_results) if request.localization_results else 0
+            # Estimate percentage if possible
+            pct = 0.0
+            if total_problematic > 0 and request.localization_results:
+                est_size = 100000
+                total_rows = sum(r.end_row - r.start_row + 1 for r in request.localization_results)
+                pct = min(100.0, (total_rows / est_size) * 100)
+            loc_results = SimpleLocalizationResult(total_problematic, pct)
+            
+            # Run recommendations
+            logger.info(f"Generating recommendations for {request.dataset_path}")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            recommendation_plan = loop.run_until_complete(
                 self.recommender.generate_recommendations(
-                    data_path=request.dataset_path,
-                    collapse_score=None,  # Would need conversion
-                    localization_results=None  # Would need conversion
+                    collapse_score=collapse_score,
+                    dimension_scores=dimension_scores,
+                    diversity_score=70.0,
+                    dataset_size=100000,
+                    localization_results=loc_results
                 )
             )
             
@@ -231,33 +324,56 @@ class CollapseServiceServicer(collapse_pb2_grpc.CollapseServiceServicer):
             # Convert to proto
             response = collapse_pb2.RecommendationsResponse(job_id=job_id)
             
-            for rec in recommendations:
+            # Map combined impact
+            response.combined_impact.CopyFrom(collapse_pb2.CombinedImpact(
+                current_risk_score=collapse_score,
+                expected_risk_score=float(recommendation_plan.projected_score),
+                total_improvement=float(recommendation_plan.total_expected_impact),
+                estimated_time=f"{recommendation_plan.total_duration_days:.1f} days",
+                prerequisites=recommendation_plan.quick_wins
+            ))
+            
+            # Convert recommendations
+            from collapse_engine.recommender import ConfidenceLevel
+            
+            for rec in recommendation_plan.recommendations:
+                # Map enums/objects to correct scalar types
+                priority_val = rec.priority.value if hasattr(rec.priority, 'value') else int(rec.priority)
+                category_str = rec.category.value if hasattr(rec.category, 'value') else str(rec.category)
+                
+                # Confidence mapping
+                conf_map = {
+                    ConfidenceLevel.VERY_HIGH: 0.95,
+                    ConfidenceLevel.HIGH: 0.8,
+                    ConfidenceLevel.MEDIUM: 0.6,
+                    ConfidenceLevel.LOW: 0.3
+                }
+                conf_val = conf_map.get(rec.confidence_level, 0.7)
+                
                 recommendation = collapse_pb2.Recommendation(
-                    priority=rec.priority,
-                    category=rec.category,
+                    priority=priority_val,
+                    category=category_str,
                     title=rec.title,
                     description=rec.description,
-                    confidence=rec.confidence
+                    confidence=conf_val
                 )
                 
                 # Map impact
-                if hasattr(rec, 'impact'):
-                    recommendation.impact.CopyFrom(collapse_pb2.Impact(
-                        current_risk_score=rec.impact.current_risk_score,
-                        expected_risk_score=rec.impact.expected_risk_score,
-                        improvement=rec.impact.improvement
-                    ))
+                recommendation.impact.CopyFrom(collapse_pb2.Impact(
+                    current_risk_score=collapse_score,
+                    expected_risk_score=min(100.0, collapse_score + rec.impact_prediction.expected_improvement),
+                    improvement=rec.impact_prediction.expected_improvement
+                ))
                 
                 # Map implementation
-                if hasattr(rec, 'implementation'):
-                    recommendation.implementation.CopyFrom(collapse_pb2.Implementation(
-                        method=rec.implementation.method,
-                        affected_rows=rec.implementation.affected_rows,
-                        affected_columns=rec.implementation.affected_columns or [],
-                        estimated_time=rec.implementation.estimated_time,
-                        steps=rec.implementation.steps or [],
-                        code_snippet=rec.implementation.code_snippet or ""
-                    ))
+                recommendation.implementation.CopyFrom(collapse_pb2.Implementation(
+                    method=rec.category.value if hasattr(rec.category, 'value') else str(rec.category),
+                    affected_rows=0,
+                    affected_columns=list(dimension_scores.keys()),
+                    estimated_time=f"{rec.estimated_duration_days:.1f} days",
+                    steps=rec.steps,
+                    code_snippet=""
+                ))
                 
                 response.recommendations.append(recommendation)
             

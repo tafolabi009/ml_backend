@@ -188,6 +188,24 @@ class DiversityAnalyzer:
                     'size_gb': Path(data_path).stat().st_size / (1024**3),
                     'dtype': dataset.dtype
                 }
+        elif data_format == 'numpy':
+            data = np.load(data_path, mmap_mode='r')
+            return {
+                'rows': data.shape[0],
+                'columns': data.shape[1] if data.ndim > 1 else 1,
+                'size_gb': Path(data_path).stat().st_size / (1024**3),
+                'dtype': data.dtype
+            }
+        elif data_format == 'tensor':
+            data = torch.load(data_path, map_location='cpu', weights_only=True)
+            if isinstance(data, torch.Tensor):
+                return {
+                    'rows': data.shape[0],
+                    'columns': data.shape[1] if data.ndim > 1 else 1,
+                    'size_gb': Path(data_path).stat().st_size / (1024**3),
+                    'dtype': str(data.dtype)
+                }
+            raise ValueError(f"Expected torch.Tensor in {data_path}, got {type(data)}")
         else:  # CSV, JSON, etc.
             # Use sampling for quick metadata
             df_sample = pd.read_csv(data_path, nrows=1000) if data_format == 'csv' else pd.read_json(data_path, lines=True, nrows=1000)
@@ -231,6 +249,29 @@ class DiversityAnalyzer:
                 if chunk_count % 100 == 0:
                     logger.info(f"Processed {chunk_count * self.config.chunk_size:,} rows")
         
+        elif data_format in ('numpy', 'tensor'):
+            # Load as memory-mapped numpy and stream in chunks
+            if data_format == 'numpy':
+                arr = np.load(data_path, mmap_mode='r')
+            else:
+                tensor = torch.load(data_path, map_location='cpu', weights_only=True)
+                arr = tensor.numpy() if isinstance(tensor, torch.Tensor) else np.array(tensor)
+            
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            
+            # Stream in chunks
+            for start in range(0, arr.shape[0], self.config.chunk_size):
+                end = min(start + self.config.chunk_size, arr.shape[0])
+                chunk = arr[start:end]
+                # Create a minimal DataFrame-like dict for the accumulator
+                chunk_dict = {f"dim_{i}": chunk[:, i] for i in range(chunk.shape[1])}
+                chunk_df = pd.DataFrame(chunk_dict)
+                self._update_accumulators(accumulators, chunk_df, target_columns)
+                chunk_count += 1
+                if chunk_count % 100 == 0:
+                    logger.info(f"Processed {chunk_count * self.config.chunk_size:,} rows")
+        
         # Finalize statistics
         stats = self._finalize_statistics(accumulators)
         
@@ -249,6 +290,64 @@ class DiversityAnalyzer:
             df = pd.read_csv(data_path)
         elif data_format == 'hdf5':
             df = pd.read_hdf(data_path)
+        elif data_format == 'numpy':
+            # Direct numpy load — bypasses Pandas entirely for embedding data
+            arr = np.load(data_path)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            logger.info(f"Loaded numpy array: shape={arr.shape}, dtype={arr.dtype}")
+            
+            stats = {}
+            # Process in chunks to avoid OOM on large embedding arrays
+            n_cols = arr.shape[1]
+            for col_idx in range(n_cols):
+                col_data = arr[:, col_idx]
+                col_name = f"dim_{col_idx}"
+                stats[col_name] = {
+                    'mean': float(np.nanmean(col_data)),
+                    'std': float(np.nanstd(col_data)),
+                    'min': float(np.nanmin(col_data)),
+                    'max': float(np.nanmax(col_data)),
+                    'median': float(np.nanmedian(col_data)),
+                    'q25': float(np.nanpercentile(col_data, 25)),
+                    'q75': float(np.nanpercentile(col_data, 75)),
+                    'skew': 0.0,  # Skip expensive scipy call for embeddings
+                    'kurtosis': 0.0,
+                    'nulls': int(np.isnan(col_data).sum()),
+                    'unique': min(len(np.unique(col_data)), arr.shape[0]),
+                    'count': arr.shape[0]
+                }
+            return stats
+        elif data_format == 'tensor':
+            # Direct PyTorch tensor load — bypasses Pandas entirely
+            tensor = torch.load(data_path, map_location='cpu', weights_only=True)
+            if not isinstance(tensor, torch.Tensor):
+                raise ValueError(f"Expected torch.Tensor, got {type(tensor)}")
+            arr = tensor.numpy()
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            logger.info(f"Loaded tensor: shape={arr.shape}, dtype={arr.dtype}")
+            
+            stats = {}
+            n_cols = arr.shape[1]
+            for col_idx in range(n_cols):
+                col_data = arr[:, col_idx]
+                col_name = f"dim_{col_idx}"
+                stats[col_name] = {
+                    'mean': float(np.nanmean(col_data)),
+                    'std': float(np.nanstd(col_data)),
+                    'min': float(np.nanmin(col_data)),
+                    'max': float(np.nanmax(col_data)),
+                    'median': float(np.nanmedian(col_data)),
+                    'q25': float(np.nanpercentile(col_data, 25)),
+                    'q75': float(np.nanpercentile(col_data, 75)),
+                    'skew': 0.0,
+                    'kurtosis': 0.0,
+                    'nulls': int(np.isnan(col_data).sum()),
+                    'unique': min(len(np.unique(col_data)), arr.shape[0]),
+                    'count': arr.shape[0]
+                }
+            return stats
         else:
             df = pd.read_json(data_path, lines=True)
         
@@ -457,26 +556,46 @@ class DiversityAnalyzer:
             return await self._compute_streaming_correlations(data_path, data_format, target_columns)
         else:
             # Exact correlation for smaller datasets
-            if data_format == 'parquet':
+            if data_format == 'numpy':
+                arr = np.load(data_path)
+                if arr.ndim == 1:
+                    arr = arr.reshape(-1, 1)
+                data_values = arr
+            elif data_format == 'tensor':
+                tensor = torch.load(data_path, map_location='cpu', weights_only=True)
+                data_values = tensor.numpy() if isinstance(tensor, torch.Tensor) else np.array(tensor)
+                if data_values.ndim == 1:
+                    data_values = data_values.reshape(-1, 1)
+            elif data_format == 'parquet':
                 df = pd.read_parquet(data_path)
+                if target_columns:
+                    df = df[target_columns]
+                else:
+                    df = df.select_dtypes(include=[np.number])
+                data_values = df.values
             elif data_format == 'csv':
                 df = pd.read_csv(data_path)
+                if target_columns:
+                    df = df[target_columns]
+                else:
+                    df = df.select_dtypes(include=[np.number])
+                data_values = df.values
             else:
                 df = pd.read_json(data_path, lines=True)
-            
-            if target_columns:
-                df = df[target_columns]
-            else:
-                df = df.select_dtypes(include=[np.number])
+                if target_columns:
+                    df = df[target_columns]
+                else:
+                    df = df.select_dtypes(include=[np.number])
+                data_values = df.values
             
             # GPU acceleration if available
             if self.device.type == 'cuda':
-                data_tensor = torch.tensor(df.values, device=self.device, dtype=torch.float32)
+                data_tensor = torch.tensor(data_values, device=self.device, dtype=torch.float32)
                 corr_matrix = torch.corrcoef(data_tensor.T).cpu().numpy()
             else:
-                corr_matrix = df.corr().values
+                corr_matrix = np.corrcoef(data_values.T)
             
-            return corr_matrix
+            return np.nan_to_num(corr_matrix)
     
     async def _compute_streaming_correlations(
         self, data_path: str, data_format: str, target_columns: Optional[List[str]]

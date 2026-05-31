@@ -1,6 +1,7 @@
 """Validation Engine - Phase 2-5 of Synthos validation pipeline"""
 
 from .diversity_analyzer import DiversityAnalyzer, DiversityScore, StratificationConfig
+from .universal_validator import UniversalDatasetValidator, UniversalValidationReport
 
 # CascadeTrainer has heavy dependencies (resonance_nn) - import lazily
 def get_cascade_trainer():
@@ -13,4 +14,6 @@ __all__ = [
     'DiversityScore',
     'StratificationConfig',
     'get_cascade_trainer',
+    'UniversalDatasetValidator',
+    'UniversalValidationReport',
 ]

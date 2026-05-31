@@ -320,7 +320,22 @@ class CascadeTrainer:
         criterion = nn.CrossEntropyLoss()
         
         # Create dataloaders
-        train_dataset = TensorDataset(train_data[:-1], train_data[1:])
+        # FIX: Shift along the SEQUENCE dimension (dim=1), not the batch dimension.
+        # Supports 2D (Batch, Seq_Len) and 3D (Batch, Seq_Len, Embed_Dim) tensors.
+        if train_data.ndim == 2:
+            inputs = train_data[:, :-1]
+            targets = train_data[:, 1:]
+        elif train_data.ndim == 3:
+            # Multimodal continuous latents: (Batch, Seq_Len, Embed_Dim)
+            inputs = train_data[:, :-1, :]
+            targets = train_data[:, 1:, :]
+        else:
+            raise ValueError(
+                f"train_data must be 2D or 3D, got {train_data.ndim}D "
+                f"(shape={train_data.shape})"
+            )
+
+        train_dataset = TensorDataset(inputs, targets)
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
@@ -349,8 +364,8 @@ class CascadeTrainer:
                 
                 # Calculate loss
                 loss = criterion(
-                    outputs.view(-1, outputs.size(-1)),
-                    targets.view(-1)
+                    outputs.reshape(-1, outputs.size(-1)),
+                    targets.reshape(-1)
                 )
                 
                 # Backward pass
@@ -448,16 +463,24 @@ class CascadeTrainer:
         val_losses = []
         
         with torch.no_grad():
-            # Validate in batches
+            # Validate in batches — shift along sequence dim, not batch dim
             batch_size = 128
-            for i in range(0, len(val_data) - 1, batch_size):
-                inputs = val_data[i:i+batch_size-1].to(device)
-                targets = val_data[i+1:i+batch_size].to(device)
+            for i in range(0, len(val_data), batch_size):
+                batch = val_data[i:min(i + batch_size, len(val_data))]
+                if batch.ndim == 2:
+                    inputs = batch[:, :-1].to(device)
+                    targets = batch[:, 1:].to(device)
+                elif batch.ndim == 3:
+                    inputs = batch[:, :-1, :].to(device)
+                    targets = batch[:, 1:, :].to(device)
+                else:
+                    inputs = batch[:, :-1].to(device)
+                    targets = batch[:, 1:].to(device)
                 
                 outputs = model(inputs)
                 loss = criterion(
-                    outputs.view(-1, outputs.size(-1)),
-                    targets.view(-1)
+                    outputs.reshape(-1, outputs.size(-1)),
+                    targets.reshape(-1)
                 )
                 val_losses.append(loss.item())
         
