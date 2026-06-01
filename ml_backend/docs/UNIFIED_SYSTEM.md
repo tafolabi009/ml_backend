@@ -159,4 +159,4 @@ All services configured via environment variables:
 
 ---
 
-*Last Updated: January 27, 2026*
+*Last Updated: June 2026*

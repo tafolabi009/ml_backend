@@ -44,7 +44,7 @@
                                       ┃  STAGE 3: TRAIN   ┃
                                       ┃    CASCADE        ┃
                                       ┃                   ┃
-                                      ┃  18 Resonance NN  ┃
+                                      ┃  18 TEN models    ┃
                                       ┃  Models:          ┃
                                       ┃  • 10 tiny (76M)  ┃
                                       ┃  • 5 small (454M) ┃
@@ -343,4 +343,4 @@ result = await orchestrator.validate("data.parquet", "parquet")
 
 ---
 
-*Last Updated: January 27, 2026*
+*Last Updated: June 2026*

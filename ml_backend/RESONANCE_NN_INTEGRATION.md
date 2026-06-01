@@ -1,5 +1,7 @@
 # Resonance NN Integration Complete ✅
 
+> ⚠️ **SUPERSEDED**: Resonance NN was subsequently replaced by **Temporal Eigenstate Networks (TEN)** from the `ten` package. All `Resonance*` class names in `model_architectures.py` are now backward-compatibility aliases for `TENWrapper`. This document is retained as historical reference for the migration path.
+
 ## Overview
 Successfully replaced the TEN (Temporal Eigenstate Networks) architecture with the new **Resonance Neural Networks** from the NEURON_NEW repository.
 

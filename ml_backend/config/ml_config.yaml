@@ -1,10 +1,10 @@
 # ML Model Configuration
-# Uses Resonance NN (FFT-based Spectral)
+# Uses TEN (Temporal Eigenstate Networks)
 # NO ATTENTION MECHANISM - Pure spectral processing via FFT
 
 architecture_config:
-  # Primary: Resonance NN (O(n log n) FFT-based, NO attention)
-  primary_architecture: "resonance_nn"
+  # Primary: TEN (O(T log T) FFT + Triton accelerated, NO attention)
+  primary_architecture: "ten"
   architecture_type: "spectral_fft"  # FFT-based, not transformer-based
   
   # Automatically choose based on data type
@@ -15,7 +15,7 @@ architecture_config:
   uses_fft: true
   uses_spectral_processing: true
 
-resonance_nn_config:
+ten_config:
   # Model sizes for multi-scale cascade
   # Uses: HierarchicalFFT + MultiHeadFrequencyLayer + AdvancedSpectralGating
   

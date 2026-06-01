@@ -253,7 +253,7 @@ class TestIntegration:
 
 **Status**: Testing framework solid. Keep building! 🚀
 
-*Last Updated: January 27, 2026*
+*Last Updated: June 2026*
 ```bash
 pytest tests/integration/test_full_pipeline.py::TestFullPipeline::test_error_handling_invalid_path -v
 ```

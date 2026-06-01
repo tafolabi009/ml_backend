@@ -42,7 +42,7 @@ cd ml_backend/ml_backend
 # Install dependencies
 pip install -r requirements.txt
 
-# Install Resonance NN
+# Install TEN (Temporal Eigenstate Networks)
 pip install git+https://github.com/tafolabi009/NEURON_NEW.git
 
 # Set environment variables

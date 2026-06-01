@@ -27,7 +27,7 @@ The **ML validation engine** that detects model collapse BEFORE training begins.
 
 ### Our Custom Architectures (NO Transformers!)
 
-#### 1. **Resonance NN (Primary)**
+#### 1. **Temporal Eigenstate Networks — TEN (Primary)**
 - **Type:** FFT-based spectral processing
 - **Key Components:**
   - `HierarchicalFFT` - Multi-scale frequency decomposition
@@ -53,7 +53,7 @@ The **ML validation engine** that detects model collapse BEFORE training begins.
 ## 📊 Multi-Scale Cascade Training
 
 ### Tier 1: Micro Models (76M params)
-- **Model:** Resonance NN "tiny"
+- **Model:** TEN "tiny"
 - **Count:** 10 variants
 - **Training Data:** 2M rows
 - **GPUs:** 2x H200
@@ -62,7 +62,7 @@ The **ML validation engine** that detects model collapse BEFORE training begins.
 - **Purpose:** Fast screening for obvious collapse signals
 
 ### Tier 2: Mini Models (454M params)
-- **Model:** Resonance NN "small"  
+- **Model:** TEN "small"  
 - **Count:** 5 variants
 - **Training Data:** 10M rows
 - **GPUs:** 3x H200
@@ -71,7 +71,7 @@ The **ML validation engine** that detects model collapse BEFORE training begins.
 - **Purpose:** Correlation preservation analysis
 
 ### Tier 3: Medium Models (983M params)
-- **Model:** Resonance NN "base"
+- **Model:** TEN "base"
 - **Count:** 3 variants
 - **Training Data:** 20M rows (full sample)
 - **GPUs:** 4x H200 (all)
@@ -251,7 +251,7 @@ ml_backend/
 │   │
 │   ├── connections/                 # External service connections
 │   │
-│   ├── model_architectures.py       # Resonance NN model definitions
+│   ├── model_architectures.py       # TEN model definitions (legacy Resonance NN aliases)
 │   ├── orchestrator.py              # Unified pipeline coordinator
 │   │
 │   └── utils/
@@ -323,8 +323,8 @@ for chunk in loader.stream_chunks("dataset.parquet"):
 cd ml_backend
 pip install -r requirements.txt
 
-# Install custom Resonance NN architecture (if available)
-pip install resonance-neural-networks
+# Install TEN (Temporal Eigenstate Networks)
+pip install temporal-eigenstate-networks
 ```
 
 ### 2. Generate gRPC Code (if needed)
@@ -475,4 +475,4 @@ export GRPC_MAX_MESSAGE_SIZE=100000000
 
 **Built with ❤️ and FFT | O(n log n) > O(n²) | No attention, just science**
 
-*Last Updated: January 27, 2026*
+*Last Updated: June 2026*

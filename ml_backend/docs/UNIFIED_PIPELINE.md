@@ -93,7 +93,7 @@ When you call `orchestrator.validate()`, it automatically:
 
 ### Stage 3: Cascade Training ⏱️ ~30s for 1M rows
 - Trains 18 models (10 tiny + 5 small + 3 base)
-- Uses Resonance NN architecture
+- Uses TEN (Temporal Eigenstate Networks) architecture
 - Learns data patterns
 - Prepares for collapse detection
 
@@ -377,7 +377,7 @@ orchestrator = SynthosOrchestrator(
 
 ```bash
 pip install -r requirements.txt
-pip install packages/resonance_nn-0.1.0-py3-none-any.whl
+pip install temporal-eigenstate-networks
 ```
 
 ---
@@ -405,4 +405,4 @@ pip install packages/resonance_nn-0.1.0-py3-none-any.whl
 
 ---
 
-*Last Updated: January 27, 2026*
+*Last Updated: June 2026*
