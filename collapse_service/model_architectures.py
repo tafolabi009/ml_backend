@@ -222,16 +222,55 @@ MultiModalResonanceFusion = TENWrapper
 CrossModalResonance = TENWrapper
 HolographicModalityBinder = MockResonanceModule
 
+class GenericTrainer:
+    def __init__(self, model, criterion=None, optimizer=None, device='cpu'):
+        self.model = model
+        self.device = device
+        self.criterion = criterion or torch.nn.CrossEntropyLoss()
+        if optimizer is not None:
+            self.optimizer = optimizer
+        else:
+            parameters = list(model.parameters()) if hasattr(model, 'parameters') else []
+            self.optimizer = torch.optim.Adam(parameters, lr=1e-3) if parameters else None
+
+    def train_step(self, inputs, targets):
+        if hasattr(self.model, 'train'):
+            self.model.train()
+
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+
+        outputs = self.model(inputs)
+        if outputs.ndim > targets.ndim:
+            loss = self.criterion(outputs.reshape(-1, outputs.size(-1)), targets.reshape(-1))
+        else:
+            loss = self.criterion(outputs, targets)
+
+        loss.backward()
+
+        if self.optimizer is not None:
+            self.optimizer.step()
+
+        return float(loss.detach().item())
+
+    def fit(self, dataloader, epochs=1):
+        losses = []
+        for _ in range(epochs):
+            for inputs, targets in dataloader:
+                losses.append(self.train_step(inputs, targets))
+        return losses
+
+
 # Trainers
-ResonanceTrainer = object
-ResonanceAutoEncoderTrainer = object
-ResonanceClassifierTrainer = object
+ResonanceTrainer = GenericTrainer
+ResonanceAutoEncoderTrainer = GenericTrainer
+ResonanceClassifierTrainer = GenericTrainer
 
 def create_criterion(*args, **kwargs):
     return torch.nn.CrossEntropyLoss()
 
 def create_trainer(*args, **kwargs):
-    return None
+    return GenericTrainer(*args, **kwargs)
 
 RESONANCE_AVAILABLE = True
 

@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
@@ -95,8 +96,16 @@ func NewProductionClients(ctx context.Context, cfg ProductionClientConfig) (*Pro
 	}
 	
 	if cfg.TLSEnabled {
-		// TODO: Add TLS credentials
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if cfg.TLSCertFile == "" {
+			return nil, fmt.Errorf("tls is enabled but no TLSCertFile was provided")
+		}
+
+		transportCredentials, err := credentials.NewClientTLSFromFile(cfg.TLSCertFile, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to load tls credentials: %w", err)
+		}
+
+		opts = append(opts, grpc.WithTransportCredentials(transportCredentials))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}

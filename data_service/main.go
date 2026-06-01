@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -8,9 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/synthos/data-service/internal/repository"
 	"github.com/synthos/data-service/internal/service"
 	pb "github.com/tafolabi009/backend/proto/data"
 )
@@ -26,6 +29,27 @@ func main() {
 		storagePath = "/tmp/synthos_datasets"
 	}
 
+	databaseURL := os.Getenv("DATA_SERVICE_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = os.Getenv("DATABASE_URL")
+	}
+
+	var metadataRepo *repository.MetadataRepository
+	if databaseURL != "" {
+		pool, err := pgxpool.New(context.Background(), databaseURL)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v", err)
+		}
+		metadataRepo = repository.NewMetadataRepository(pool)
+		if err := metadataRepo.EnsureSchema(context.Background()); err != nil {
+			log.Fatalf("Failed to ensure datasets schema: %v", err)
+		}
+		defer pool.Close()
+		log.Printf("  - Metadata DB enabled")
+	} else {
+		log.Printf("  - Metadata DB disabled (set DATA_SERVICE_DATABASE_URL or DATABASE_URL)")
+	}
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
@@ -38,7 +62,7 @@ func main() {
 	)
 
 	// Create and register data service
-	dataService := service.NewDataServiceServer(storagePath)
+	dataService := service.NewDataServiceServerWithRepo(storagePath, metadataRepo)
 	pb.RegisterDataServiceServer(grpcServer, dataService)
 
 	// Enable reflection for grpcurl/grpcui
@@ -55,6 +79,9 @@ func main() {
 
 	log.Printf("🚀 Data Service starting on port %s...", port)
 	log.Printf("  - Storage Path: %s", storagePath)
+	if databaseURL != "" {
+		log.Printf("  - Database URL: configured")
+	}
 	log.Printf("  - UploadDataset: Ready for streaming uploads")
 	log.Printf("  - GetDatasetMetadata: Ready")
 	log.Printf("  - ListDatasets: Ready")

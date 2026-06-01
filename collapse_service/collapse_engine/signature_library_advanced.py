@@ -24,7 +24,7 @@ import json
 from pathlib import Path
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 import asyncio
 
@@ -768,17 +768,23 @@ class AdvancedSignatureLibrary:
     
     def _process_temporal_data(self, temporal_data: np.ndarray) -> np.ndarray:
         """Process temporal sequence data (e.g., sliding window statistics)"""
-        # Simple placeholder: return sliding window means
         if len(temporal_data) < 10:
             return temporal_data
         
-        window_size = 10
-        windows = []
-        for i in range(0, len(temporal_data) - window_size + 1, window_size):
-            window = temporal_data[i:i+window_size]
-            windows.append(np.mean(window))
-        
-        return np.array(windows)
+        window_size = min(10, max(2, len(temporal_data) // 5))
+        step = max(1, window_size // 2)
+        features = []
+
+        for i in range(0, len(temporal_data) - window_size + 1, step):
+            window = np.asarray(temporal_data[i:i + window_size], dtype=float)
+            features.extend([
+                float(np.mean(window)),
+                float(np.std(window)),
+                float(np.min(window)),
+                float(np.max(window)),
+            ])
+
+        return np.array(features if features else temporal_data, dtype=float)
     
     # ==================== CONFIDENCE & EXPLAINABILITY ====================
     
@@ -1206,7 +1212,7 @@ class AdvancedSignatureLibrary:
     
     def _get_timestamp(self) -> str:
         """Get current ISO timestamp"""
-        return datetime.utcnow().isoformat()
+        return datetime.now(timezone.utc).isoformat()
     
     def _get_index_type(self) -> str:
         """Get current index type description"""

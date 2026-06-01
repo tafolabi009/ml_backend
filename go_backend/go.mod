@@ -26,6 +26,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.16.0
+	github.com/stripe/stripe-go/v83 v83.0.0
 	github.com/sony/gobreaker v1.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tafolabi009/backend/proto v0.0.0-00010101000000-000000000000

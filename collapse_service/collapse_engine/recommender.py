@@ -1025,6 +1025,10 @@ class AdvancedRecommendationEngine:
         # Success probability (product of individual probabilities)
         success_prob = np.prod([rec.impact_prediction.success_probability for rec in recommendations])
         
+        total_impact = max(0.0, total_impact)
+        lower_bound = max(0.0, lower_bound)
+        upper_bound = max(lower_bound, upper_bound)
+
         return total_impact, (lower_bound, upper_bound), success_prob
     
     # ==================== QUICK WINS ====================

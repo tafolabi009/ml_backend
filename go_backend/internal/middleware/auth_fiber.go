@@ -250,10 +250,6 @@ func RequireRole(roles ...string) fiber.Handler {
 }
 
 // RateLimitFiber is Fiber middleware for rate limiting
-// TODO: Implement with Redis for distributed rate limiting
 func RateLimitFiber() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Placeholder - implement with Redis
-		return c.Next()
-	}
+	return RateLimitWithConfig(100, time.Minute)
 }

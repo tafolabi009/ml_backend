@@ -29,6 +29,8 @@ project(synthos_kernel
     LANGUAGES CXX CUDA
 )
 
+include(CTest)
+
 # ==============================================================================
 # Build Options
 # ==============================================================================
@@ -209,13 +211,13 @@ set_target_properties(synthos_static PROPERTIES
 # ==============================================================================
 
 if(SYNTHOS_BUILD_TESTS)
-    add_executable(synthos_test
-        # Add a simple test if we create one
-        # tests/test_spectral.cu
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+    add_test(
+        NAME synthos_spectral_python_tests
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_spectral.py --lib $<TARGET_FILE:synthos>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
-    
-    # This is a placeholder - actual test would need to be created
-    # target_link_libraries(synthos_test PRIVATE synthos CUDA::cudart)
 endif()
 
 # ==============================================================================

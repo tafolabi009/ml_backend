@@ -355,6 +355,26 @@ cudaError_t synthos_fused_spectral_entropy(
     int n_channels,
     cudaStream_t stream
 ) {
+    return synthos_fused_spectral_entropy_ex(
+        d_input,
+        d_entropy,
+        nullptr,
+        0,
+        n_samples,
+        n_channels,
+        stream
+    );
+}
+
+cudaError_t synthos_fused_spectral_entropy_ex(
+    const float* d_input,
+    float* d_entropy,
+    void* d_workspace,
+    size_t workspace_bytes,
+    int n_samples,
+    int n_channels,
+    cudaStream_t stream
+) {
     /* Validation */
     if (!g_state.initialized) {
         return (cudaError_t)SYNTHOS_ERROR_NOT_INITIALIZED;
@@ -374,6 +394,25 @@ cudaError_t synthos_fused_spectral_entropy(
     
     if (n_samples > SYNTHOS_MAX_FFT_SIZE) {
         return (cudaError_t)SYNTHOS_ERROR_FFT_SIZE_TOO_LARGE;
+    }
+
+    int n_freq = n_samples / 2 + 1;
+    size_t fft_workspace_bytes = sizeof(cufftComplex) * static_cast<size_t>(n_freq) * static_cast<size_t>(n_channels);
+    size_t reduction_workspace_bytes = sizeof(float) * static_cast<size_t>(n_freq) * static_cast<size_t>(n_channels);
+    size_t required_workspace_bytes = fft_workspace_bytes + reduction_workspace_bytes;
+
+    bool using_external_workspace = d_workspace != nullptr;
+    cufftComplex* d_fft = nullptr;
+    float* d_psd = nullptr;
+
+    if (using_external_workspace) {
+        if (workspace_bytes < required_workspace_bytes) {
+            return (cudaError_t)SYNTHOS_ERROR_WORKSPACE_TOO_SMALL;
+        }
+
+        char* workspace_bytes_ptr = static_cast<char*>(d_workspace);
+        d_fft = reinterpret_cast<cufftComplex*>(workspace_bytes_ptr);
+        d_psd = reinterpret_cast<float*>(workspace_bytes_ptr + fft_workspace_bytes);
     }
     
     /* Set stream for cuFFT if provided */
@@ -396,25 +435,20 @@ cudaError_t synthos_fused_spectral_entropy(
     /* Set stream for cuFFT */
     cufftSetStream(plan, work_stream);
     
-    /* Allocate temporary buffers */
-    int n_freq = n_samples / 2 + 1;  /* R2C FFT output size */
-    
-    cufftComplex* d_fft = nullptr;
-    float* d_psd = nullptr;
-    
     cudaError_t err;
-    
-    /* Allocate FFT output buffer (complex) */
-    err = cudaMalloc(&d_fft, sizeof(cufftComplex) * n_freq * n_channels);
-    if (err != cudaSuccess) {
-        return err;
-    }
-    
-    /* Allocate PSD buffer */
-    err = cudaMalloc(&d_psd, sizeof(float) * n_freq * n_channels);
-    if (err != cudaSuccess) {
-        cudaFree(d_fft);
-        return err;
+
+    if (!using_external_workspace) {
+        /* Allocate temporary buffers */
+        err = cudaMalloc(&d_fft, fft_workspace_bytes);
+        if (err != cudaSuccess) {
+            return err;
+        }
+
+        err = cudaMalloc(&d_psd, reduction_workspace_bytes);
+        if (err != cudaSuccess) {
+            cudaFree(d_fft);
+            return err;
+        }
     }
     
     /* ==================== Step 1: Batch FFT ==================== */
@@ -438,36 +472,20 @@ cudaError_t synthos_fused_spectral_entropy(
     /* Architecture-specific dispatch */
     err = dispatch_entropy_kernel(d_psd, d_entropy, n_freq, n_channels, work_stream);
     if (err != cudaSuccess) {
-        cudaFree(d_fft);
-        cudaFree(d_psd);
+        if (!using_external_workspace) {
+            cudaFree(d_fft);
+            cudaFree(d_psd);
+        }
         return err;
     }
     
     /* Cleanup temporary buffers */
-    cudaFree(d_fft);
-    cudaFree(d_psd);
+    if (!using_external_workspace) {
+        cudaFree(d_fft);
+        cudaFree(d_psd);
+    }
     
     return cudaSuccess;
-}
-
-cudaError_t synthos_fused_spectral_entropy_ex(
-    const float* d_input,
-    float* d_entropy,
-    void* d_workspace,
-    size_t workspace_bytes,
-    int n_samples,
-    int n_channels,
-    cudaStream_t stream
-) {
-    /* Extended version with caller-managed workspace */
-    /* TODO: Implement workspace-based version for zero-allocation hot path */
-    /* For now, delegate to standard version */
-    (void)d_workspace;
-    (void)workspace_bytes;
-    
-    return synthos_fused_spectral_entropy(
-        d_input, d_entropy, n_samples, n_channels, stream
-    );
 }
 
 cudaError_t synthos_get_workspace_size(

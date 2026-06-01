@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/stripe/stripe-go/v83"
+	stripepaymentintent "github.com/stripe/stripe-go/v83/paymentintent"
 	"github.com/tafolabi009/backend/go_backend/internal/models"
 	"github.com/tafolabi009/backend/go_backend/internal/repository"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
@@ -93,6 +97,16 @@ func PurchaseCreditsFiber(c *fiber.Ctx) error {
 		})
 	}
 
+	paymentMethod := strings.TrimSpace(req.PaymentMethod)
+	if paymentMethod == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":    "INVALID_REQUEST",
+				"message": "payment_method is required",
+			},
+		})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -109,12 +123,19 @@ func PurchaseCreditsFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Integrate with payment provider (Stripe) here
-	// For now, we simulate a successful payment and add credits
-
 	totalCredits := pkg.Credits + pkg.BonusCredits
 	refType := "package"
-	description := fmt.Sprintf("Purchased %s package (%d + %d bonus credits)", pkg.Name, pkg.Credits, pkg.BonusCredits)
+	description := fmt.Sprintf("Purchased %s package via %s (%d + %d bonus credits)", pkg.Name, paymentMethod, pkg.Credits, pkg.BonusCredits)
+
+	if err := processCreditPayment(ctx, pkg.PriceCents, pkg.Currency, paymentMethod, description); err != nil {
+		log.Printf("Payment processing failed: %v", err)
+		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":    "PAYMENT_FAILED",
+				"message": "Payment could not be processed",
+			},
+		})
+	}
 
 	transaction, err := creditRepo.AddCredits(ctx, userID, totalCredits, "purchase", description, &refType, &pkg.ID)
 	if err != nil {
@@ -151,6 +172,39 @@ func PurchaseCreditsFiber(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
+}
+
+func processCreditPayment(ctx context.Context, amountCents int64, currency string, paymentMethod string, description string) error {
+	secretKey := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY"))
+	if secretKey == "" {
+		// Fall back to simulated payment when Stripe is not configured.
+		log.Printf("STRIPE_SECRET_KEY not configured; simulating payment for %s", description)
+		return nil
+	}
+
+	stripe.Key = secretKey
+
+	params := &stripe.PaymentIntentParams{
+		Amount:        stripe.Int64(amountCents),
+		Currency:      stripe.String(strings.ToLower(currency)),
+		PaymentMethod: stripe.String(paymentMethod),
+		Confirm:       stripe.Bool(true),
+		Description:   stripe.String(description),
+		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
+			Enabled: stripe.Bool(true),
+		},
+	}
+
+	pi, err := stripepaymentintent.New(params)
+	if err != nil {
+		return fmt.Errorf("stripe payment intent creation failed: %w", err)
+	}
+
+	if pi.Status != stripe.PaymentIntentStatusSucceeded && pi.Status != stripe.PaymentIntentStatusRequiresCapture {
+		return fmt.Errorf("stripe payment not succeeded: %s", pi.Status)
+	}
+
+	return nil
 }
 
 // GetCreditHistoryFiber returns paginated credit transaction history
