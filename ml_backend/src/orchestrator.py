@@ -24,6 +24,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import time
 
 import torch
 import numpy as np
@@ -413,7 +414,7 @@ class SynthosOrchestrator:
         Returns:
             ValidationResult with complete analysis and decision
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.time()
         
         # Generate IDs if not provided
         if validation_id is None:
@@ -559,12 +560,43 @@ class SynthosOrchestrator:
             else:
                 data_tensor = torch.tensor(dataset, dtype=torch.float32)
             
-            # Train cascade
-            cascade_result = await self.cascade_trainer.train_cascade(
-                data_tensor,
-                num_tiers=3,
-                models_per_tier=[10, 5, 3]
+            # Initialize CascadeTrainer if not already initialized (Bug 18)
+            if self.cascade_trainer is None:
+                self.cascade_trainer = CascadeTrainer(
+                    dataset_id=dataset_id,
+                    validation_id=validation_id,
+                    config={},
+                    hardware_config=None
+                )
+                
+            # Split data_tensor into train_data and val_data, count vocab_size (Bug 19)
+            split_idx = int(len(data_tensor) * 0.95)
+            if split_idx >= len(data_tensor):
+                split_idx = len(data_tensor) - 1
+            train_data = data_tensor[:split_idx]
+            val_data = data_tensor[split_idx:]
+            
+            vocab_size = 10000  # Default vocab size
+            if data_tensor.ndim == 2 and not torch.is_floating_point(data_tensor):
+                vocab_size = int(data_tensor.max().item() + 1)
+            
+            cascade_results = await self.cascade_trainer.train_cascade(
+                train_data=train_data,
+                val_data=val_data,
+                vocab_size=vocab_size
             )
+            
+            # Group model results by tier to count how many models were trained per tier
+            models_per_tier = {'tier_1': 0, 'tier_2': 0, 'tier_3': 0}
+            for model_res in cascade_results:
+                tier_key = f"tier_{model_res.tier}"
+                if tier_key in models_per_tier:
+                    models_per_tier[tier_key] += 1
+                    
+            cascade_result = {
+                'models_per_tier': models_per_tier,
+                'results': cascade_results
+            }
             
             cascade_time = asyncio.get_event_loop().time() - stage_start
             num_models = sum(cascade_result['models_per_tier'].values())
@@ -832,15 +864,16 @@ class SynthosOrchestrator:
         if diversity_score < self.diversity_threshold:
             reasons.append(f"Diversity score ({diversity_score:.1f}) below threshold ({self.diversity_threshold})")
         
-        # Check critical dimensions
+        # Check critical dimensions (Bug 13)
         critical_dims = [
-            'mode_collapse',
-            'spectral_degradation',
-            'gradient_pathology'
+            'distribution_fidelity',
+            'spectral_coherence',
+            'gradient_health'
         ]
         
         for dim in critical_dims:
-            score = dimension_scores.get(dim, 100)
+            dim_val = dimension_scores.get(dim, 100)
+            score = dim_val.score if hasattr(dim_val, 'score') else dim_val
             if score < 40:
                 reasons.append(f"Critical dimension '{dim}' severely degraded ({score:.1f}/100)")
         

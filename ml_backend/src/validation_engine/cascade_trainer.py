@@ -125,6 +125,17 @@ class CascadeTrainer:
             self.cascade_config = config.get('cascade_training', {})
             self.num_variants = config.get('cascade_training', {}).get('num_variants_per_tier', 
                                 {'tier_1': 10, 'tier_2': 5, 'tier_3': 3})
+            
+        # Ensure self.cascade_config has defaults for hyperparameters (Bug 5)
+        for key, default in [
+            ('learning_rate', 0.001),
+            ('weight_decay', 0.01),
+            ('max_epochs_per_model', 5),
+            ('gradient_clip_norm', 1.0),
+            ('early_stopping_patience', 3)
+        ]:
+            if key not in self.cascade_config:
+                self.cascade_config[key] = config.get('cascade_training', {}).get(key, default)
         
         self.total_models = sum(self.num_variants.values())
         
@@ -360,7 +371,10 @@ class CascadeTrainer:
             weight_decay=self.cascade_config['weight_decay']
         )
         
-        criterion = nn.CrossEntropyLoss()
+        if train_data.ndim == 3:
+            criterion = nn.MSELoss()
+        else:
+            criterion = nn.CrossEntropyLoss()
         
         # Create dataloaders
         # FIX: Shift along the SEQUENCE dimension (dim=1), not the batch dimension.
@@ -405,11 +419,17 @@ class CascadeTrainer:
                 # Forward pass (using FFT-based spectral processing)
                 outputs = model(inputs)
                 
-                # Calculate loss
-                loss = criterion(
-                    outputs.reshape(-1, outputs.size(-1)),
-                    targets.reshape(-1)
-                )
+                # Calculate loss (Bug 1)
+                if train_data.ndim == 3:
+                    loss = criterion(
+                        outputs,
+                        targets
+                    )
+                else:
+                    loss = criterion(
+                        outputs.reshape(-1, outputs.size(-1)),
+                        targets.reshape(-1)
+                    )
                 
                 # Backward pass
                 loss.backward()
@@ -521,10 +541,16 @@ class CascadeTrainer:
                     targets = batch[:, 1:].to(device)
                 
                 outputs = model(inputs)
-                loss = criterion(
-                    outputs.reshape(-1, outputs.size(-1)),
-                    targets.reshape(-1)
-                )
+                if batch.ndim == 3:
+                    loss = criterion(
+                        outputs,
+                        targets
+                    )
+                else:
+                    loss = criterion(
+                        outputs.reshape(-1, outputs.size(-1)),
+                        targets.reshape(-1)
+                    )
                 val_losses.append(loss.item())
         
         return np.mean(val_losses)
@@ -586,7 +612,7 @@ class CascadeTrainer:
         """
         # Check for loss oscillations
         if len(loss_curve) > 3:
-            loss_variance = np.var(loss_curve[-5:])
+            loss_variance = np.var(loss_curve[-min(5, len(loss_curve)):])
             if loss_variance > 1.0:  # High variance indicates instability
                 return True
         
@@ -605,15 +631,21 @@ class CascadeTrainer:
         total_norm = 0.0
         max_grad = 0.0
         min_grad = float('inf')
+        has_grad = False
         
         for p in model.parameters():
             if p.grad is not None:
+                has_grad = True
                 param_norm = p.grad.data.norm(2).item()
                 total_norm += param_norm ** 2
                 max_grad = max(max_grad, p.grad.data.abs().max().item())
                 min_grad = min(min_grad, p.grad.data.abs().min().item())
         
-        total_norm = total_norm ** 0.5
+        if not has_grad:
+            min_grad = 0.0
+            total_norm = 0.0
+        else:
+            total_norm = total_norm ** 0.5
         
         return {
             'total_norm': total_norm,

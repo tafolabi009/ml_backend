@@ -119,7 +119,11 @@ class UniversalDatasetValidator:
         """
         Converts raw multi-modal and quantum datasets into sequence tensors (Batch, Seq_Len, Embed_Dim).
         """
-        np.random.seed(42)
+        # Bug 8: Log simulated warning
+        logger.warning(f"Real data loading from {path} is not implemented yet. Using simulated sequence for validation.")
+        
+        # Bug 23: Isolated NumPy RNG
+        rng = np.random.default_rng(42)
         batch_size = 2
         seq_len = 128
         
@@ -128,7 +132,7 @@ class UniversalDatasetValidator:
             # Waveform shape: (16000 * 5) -> Sequence: (Batch, Seq_Len, Frame_Size)
             logger.info("Audio: Slicing waveforms into frame sequences...")
             frame_size = 512
-            waveform = np.random.randn(batch_size, seq_len * frame_size) * 0.1
+            waveform = rng.normal(0.0, 1.0, (batch_size, seq_len * frame_size)) * 0.1
             # Reshape into a sequence of 512-dim frames
             sequence = waveform.reshape(batch_size, seq_len, frame_size)
             
@@ -136,13 +140,13 @@ class UniversalDatasetValidator:
             # Map images to grids of sequential patches (e.g. 16x16)
             logger.info("Image: Dividing visual canvases into grid patch sequences...")
             patch_size = 256 # 16*16 flattened pixel patches
-            sequence = np.random.normal(128, 40, (batch_size, seq_len, patch_size))
+            sequence = rng.normal(128.0, 40.0, (batch_size, seq_len, patch_size))
             
         elif dataset_type == 'video':
             # Map temporal frames to frame feature vector sequences
             logger.info("Video: Extracting frame-to-frame temporal feature sequences...")
             frame_features = 128
-            sequence = np.random.uniform(0.1, 5.0, (batch_size, seq_len, frame_features))
+            sequence = rng.uniform(0.1, 5.0, (batch_size, seq_len, frame_features))
             
         elif dataset_type == 'quantum':
             # Map complex-valued quantum states directly to eigenstates sequences
@@ -151,21 +155,30 @@ class UniversalDatasetValidator:
             n_qubits = kwargs.get('n_qubits', 4)
             state_dim = 2**n_qubits # 16 dimensions for 4 qubits
             # Recreate state amplitude sequences
-            r_amplitudes = np.random.randn(batch_size, seq_len, state_dim)
-            i_amplitudes = np.random.randn(batch_size, seq_len, state_dim)
+            r_amplitudes = rng.normal(0.0, 1.0, (batch_size, seq_len, state_dim))
+            i_amplitudes = rng.normal(0.0, 1.0, (batch_size, seq_len, state_dim))
+            # Bug 6: Normalize complex state vectors
+            norms = np.sqrt(np.sum(r_amplitudes**2 + i_amplitudes**2, axis=-1, keepdims=True))
+            norms = np.where(norms == 0, 1.0, norms)
+            r_amplitudes = r_amplitudes / norms
+            i_amplitudes = i_amplitudes / norms
             # Combine as a real sequence representing complex amplitudes
             sequence = np.concatenate([r_amplitudes, i_amplitudes], axis=-1)
             
         elif dataset_type == 'text':
             logger.info("Text: Tokenizing text to sequence embedding tensors...")
-            sequence = np.random.randint(0, 50257, (batch_size, seq_len))
+            sequence = rng.integers(0, 50257, size=(batch_size, seq_len))
             
         else: # tabular
             logger.info("Tabular: Standardizing feature columns to row sequences...")
             n_features = 16
-            sequence = np.random.randn(batch_size, seq_len, n_features)
+            sequence = rng.normal(0.0, 1.0, (batch_size, seq_len, n_features))
 
-        return torch.tensor(sequence, dtype=torch.float32, device=self.device)
+        # Bug 2: Return long for text and float32 for others
+        if dataset_type == 'text':
+            return torch.tensor(sequence, dtype=torch.long, device=self.device)
+        else:
+            return torch.tensor(sequence, dtype=torch.float32, device=self.device)
 
     def _evaluate_with_ten(self, sequence: torch.Tensor, dataset_type: str, **kwargs) -> Tuple[Dict, List, List, float]:
         """
@@ -287,16 +300,57 @@ class UniversalDatasetValidator:
                 recs.append({'title': 'Temporal Pruning', 'description': 'Crop static/duplicate frame intervals from videos to prevent learning spatial freeze states.'})
                 
         elif dataset_type == 'quantum':
-            n_qubits = kwargs.get('n_qubits', 4)
             decoherence_rate = kwargs.get('decoherence_rate', 0.15)
             gate_depth = kwargs.get('gate_depth', 45)
             cnot_count = kwargs.get('cnot_count', 25)
             
-            # Purity and fidelity depends on decoherence rate
-            purity = 1.0 - decoherence_rate * 1.55
-            fidelity = 1.0 - decoherence_rate * 0.94
-            entanglement_entropy = 0.95 if decoherence_rate > 0.1 else 0.90
+            # Bug 7: Compute actual physical quantum metrics from sequence data
+            D = sequence.size(-1) // 2
+            n_qubits = int(np.log2(D))
             
+            # Extract real and imaginary components
+            r = sequence[..., :D] # (B, T, D)
+            i = sequence[..., D:] # (B, T, D)
+            
+            # 1. Purity of the ensemble density matrix
+            r_flat = r.reshape(-1, D)
+            i_flat = i.reshape(-1, D)
+            B_T = r_flat.size(0)
+            
+            rho_real = (torch.matmul(r_flat.t(), r_flat) + torch.matmul(i_flat.t(), i_flat)) / B_T
+            rho_imag = (torch.matmul(i_flat.t(), r_flat) - torch.matmul(r_flat.t(), i_flat)) / B_T
+            purity_val = torch.sum(rho_real**2 + rho_imag**2).item()
+            purity_data = float(max(0.0, min(1.0, purity_val)))
+            
+            # Factor in simulated environmental noise / decoherence rate
+            # Bug 3: Clamp decoherence-derived values
+            purity_sim = max(0.0, min(1.0, 1.0 - decoherence_rate * 1.55))
+            purity = purity_data * purity_sim
+            
+            # 2. Average Fidelity with respect to the first state in the sequence
+            ref_r = r[0, 0] # (D,)
+            ref_i = i[0, 0] # (D,)
+            overlap_r = torch.matmul(r_flat, ref_r.unsqueeze(-1)) + torch.matmul(i_flat, ref_i.unsqueeze(-1)) # (B_T, 1)
+            overlap_i = torch.matmul(i_flat, ref_r.unsqueeze(-1)) - torch.matmul(r_flat, ref_i.unsqueeze(-1)) # (B_T, 1)
+            fidelity_data = (overlap_r**2 + overlap_i**2).mean().item()
+            fidelity_sim = max(0.0, min(1.0, 1.0 - decoherence_rate * 0.94))
+            fidelity = fidelity_data * fidelity_sim
+            
+            # 3. Subsystem Entanglement Entropy (Schmidt decomposition)
+            n_A = n_qubits // 2
+            n_B = n_qubits - n_A
+            dim_A = 2**n_A
+            dim_B = 2**n_B
+            complex_states = torch.complex(r_flat, i_flat) # (B_T, D)
+            complex_matrices = complex_states.reshape(-1, dim_A, dim_B) # (B_T, dim_A, dim_B)
+            
+            # Run SVD
+            _, S, _ = torch.linalg.svd(complex_matrices)
+            probs = S**2
+            probs = probs / (probs.sum(dim=-1, keepdim=True) + 1e-10)
+            entropy_per_state = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)
+            entanglement_entropy = float(entropy_per_state.mean().item()) * (0.95 if decoherence_rate > 0.1 else 0.90)
+
             metrics.update({
                 'num_qubits': n_qubits,
                 'quantum_state_purity': purity,

@@ -86,6 +86,9 @@ class TENWrapper(nn.Module):
             self.ten_available = False
             self.mock = True
             
+        # Initialize continuous projection layer (Bug 16)
+        self.continuous_proj = nn.Linear(self.input_dim, self.d_model, bias=False)
+            
         # If classification, add classification head
         if self.num_classes is not None:
             self.classifier_head = nn.Linear(self.d_model, self.num_classes)
@@ -106,7 +109,12 @@ class TENWrapper(nn.Module):
             B, T, D_in = x.shape
             
             # Map input projection
-            if not hasattr(self, 'continuous_proj') or self.continuous_proj.in_features != D_in:
+            if self.continuous_proj is None or self.continuous_proj.in_features != D_in:
+                if self.continuous_proj is not None:
+                    logger.warning(
+                        f"Re-creating continuous_proj dynamic layer since input dimension changed "
+                        f"from {self.continuous_proj.in_features} to {D_in}."
+                    )
                 self.continuous_proj = nn.Linear(D_in, self.d_model, bias=False, device=x.device, dtype=x.dtype)
             
             h = self.continuous_proj(x)
@@ -396,6 +404,10 @@ def create_resonance_model(
     num_layers = config.get('num_layers', 6)
     dropout = config.get('dropout', 0.1)
     
+    # Filter kwargs to prevent passing duplicates to TENWrapper (Bug 17)
+    explicit_keys = {'vocab_size', 'input_dim', 'num_frequencies', 'hidden_dim', 'num_layers', 'dropout', 'max_seq_length', 'task'}
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k not in explicit_keys}
+
     model = TENWrapper(
         vocab_size=vocab_size,
         input_dim=config.get('input_dim', 512),
@@ -405,7 +417,7 @@ def create_resonance_model(
         dropout=dropout,
         max_seq_length=context_length,
         task=task,
-        **kwargs
+        **filtered_kwargs
     )
     
     model = model.to(device)
@@ -453,6 +465,10 @@ def create_long_context_model(
     num_layers = config.get('num_layers', 6)
     dropout = config.get('dropout', 0.1)
     
+    # Filter kwargs to prevent passing duplicates to TENWrapper (Bug 17)
+    explicit_keys = {'vocab_size', 'input_dim', 'num_frequencies', 'hidden_dim', 'num_layers', 'dropout', 'max_seq_length', 'task'}
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k not in explicit_keys}
+
     model = TENWrapper(
         vocab_size=vocab_size,
         input_dim=config.get('input_dim', 512),
@@ -462,7 +478,7 @@ def create_long_context_model(
         dropout=dropout,
         max_seq_length=max_seq_length,
         task='general',
-        **kwargs
+        **filtered_kwargs
     )
     
     model = model.to(device)

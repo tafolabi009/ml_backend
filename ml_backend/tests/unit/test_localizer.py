@@ -237,19 +237,23 @@ class TestCollapseLocalizer:
     async def test_localize_deterministic(self, collapse_dimensions):
         """Test that localization is deterministic with same seed"""
         np.random.seed(42)
+        torch.manual_seed(42)
         data1 = np.random.randn(100, 5).astype(np.float32)
         
         np.random.seed(42)
+        torch.manual_seed(42)
         data2 = np.random.randn(100, 5).astype(np.float32)
         
         config = LocalizationConfig(use_gpu=False)
         localizer = CollapseLocalizer(config)
         
+        torch.manual_seed(42)
         result1 = await localizer.localize_collapse(
             data=data1,
             collapse_dimensions=collapse_dimensions
         )
         
+        torch.manual_seed(42)
         result2 = await localizer.localize_collapse(
             data=data2,
             collapse_dimensions=collapse_dimensions

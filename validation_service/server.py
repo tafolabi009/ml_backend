@@ -112,6 +112,9 @@ class ValidationServiceServicer(validation_pb2_grpc.ValidationServiceServicer):
             from data_processors.dataset_loader import DatasetLoader
             import numpy as np
             
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             loader = DatasetLoader()
             dataset = loop.run_until_complete(loader.load_dataset(request.dataset_path, request.data_format or 'parquet'))
             

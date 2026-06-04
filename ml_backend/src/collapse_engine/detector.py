@@ -450,14 +450,17 @@ class CollapseDetector:
         self,
         synthetic_data: np.ndarray,
         original_data: np.ndarray,
-        training_history: Optional[List[Dict]] = None
+        model_gradients: Optional[Dict[str, torch.Tensor]] = None,
+        training_metrics: Optional[Dict[str, List[float]]] = None
     ) -> CollapseScore:
         """
         Detect collapse with automatic GPU memory cleanup.
         Use this for long-running inference pipelines.
         """
         try:
-            return await self.detect_collapse(synthetic_data, original_data, training_history)
+            return await self.detect_collapse(
+                synthetic_data, original_data, model_gradients, training_metrics
+            )
         finally:
             cleanup_gpu_memory()
     

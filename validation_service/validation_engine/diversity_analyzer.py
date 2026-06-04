@@ -371,7 +371,8 @@ class DiversityAnalyzer:
                 'skew': df[col].skew(),
                 'kurtosis': df[col].kurtosis(),
                 'nulls': df[col].isnull().sum(),
-                'unique': df[col].nunique()
+                'unique': df[col].nunique(),
+                'count': len(df)
             }
         
         return stats
@@ -465,7 +466,7 @@ class DiversityAnalyzer:
         cv = (std / abs(mean)) if mean != 0 else 0
         
         # Normalize to 0-100 (CV > 1 = high diversity)
-        score = min(100, cv * 50)
+        score = float(min(100.0, cv * 50.0))
         return score
     
     def _compute_uniqueness_score(self, col_stats: Dict[str, float]) -> float:
@@ -500,7 +501,7 @@ class DiversityAnalyzer:
         symmetry = 1 - abs(lower_spread - upper_spread) / iqr
         
         # Normalize to 0-100
-        score = symmetry * 100
+        score = max(0.0, min(100.0, symmetry * 100))
         return score
     
     # ==================== SKEWNESS & OUTLIERS ====================
@@ -606,7 +607,15 @@ class DiversityAnalyzer:
         
         # For simplicity, return identity matrix (can be improved with online covariance)
         # In production, implement Welford's algorithm for streaming covariance
-        n_cols = len(target_columns) if target_columns else 10
+        if target_columns:
+            n_cols = len(target_columns)
+        else:
+            try:
+                metadata = await self._get_metadata(data_path, data_format)
+                n_cols = metadata.get('columns', 10)
+            except Exception as e:
+                logger.warning(f"Failed to load metadata in streaming correlations, defaulting to 10 columns: {e}")
+                n_cols = 10
         return np.eye(n_cols)
     
     # ==================== SAMPLE QUALITY ====================
