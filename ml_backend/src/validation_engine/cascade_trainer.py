@@ -21,6 +21,7 @@ import time
 import numpy as np
 from pathlib import Path
 import asyncio
+import inspect
 from datetime import datetime
 
 # Import our custom architectures (Resonance NN from NEURON_NEW)
@@ -722,5 +723,8 @@ class CascadeTrainer:
             current_loss=current_loss
         )
         
-        # Call async callback
-        await self.progress_callback(progress)
+        # Call the progress callback, supporting both coroutine functions and
+        # plain callables so a non-async callback cannot abort training.
+        maybe_awaitable = self.progress_callback(progress)
+        if inspect.isawaitable(maybe_awaitable):
+            await maybe_awaitable
