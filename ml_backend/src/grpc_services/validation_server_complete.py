@@ -743,12 +743,17 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
 # Server Setup
 # ============================================================================
 
+# Resolve config defaults relative to the ml_backend package (or ML_CONFIG_DIR),
+# instead of a hardcoded /workspaces dev path that does not exist in containers.
+_DEFAULT_CONFIG_DIR = Path(os.getenv("ML_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "config")))
+
+
 async def serve(
     port: int = 50051,
     use_mtls: bool = os.getenv('ENABLE_MTLS', 'true').lower() == 'true',  # SECURITY: mTLS enabled by default in production
     cert_dir: Path = Path("/etc/synthos/certs"),
-    config_path: Path = Path("/workspaces/ml_backend/config/ml_config.yaml"),
-    hardware_config_path: Path = Path("/workspaces/ml_backend/config/hardware_config.yaml")
+    config_path: Path = _DEFAULT_CONFIG_DIR / "ml_config.yaml",
+    hardware_config_path: Path = _DEFAULT_CONFIG_DIR / "hardware_config.yaml"
 ):
     """
     Start the complete gRPC server with real orchestrator integration.

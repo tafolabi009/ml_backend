@@ -411,7 +411,11 @@ class DiversityAnalyzer:
             
             acc = accumulators[col]
             values = chunk_df[col].dropna().values
-            
+            if len(values) == 0:
+                # All values in this chunk were NaN; min()/max() on an empty
+                # array would raise, and an empty chunk adds nothing.
+                continue
+
             acc['count'] += len(values)
             acc['sum'] += values.sum()
             acc['sum_sq'] += (values ** 2).sum()
@@ -426,8 +430,18 @@ class DiversityAnalyzer:
         """Finalize statistics from accumulators"""
         stats = {}
         for col, acc in accumulators.items():
-            mean = acc['sum'] / acc['count']
-            variance = (acc['sum_sq'] / acc['count']) - (mean ** 2)
+            count = acc['count']
+            if count == 0:
+                # Column had no non-NaN numeric values across all chunks; emit
+                # neutral stats instead of dividing by zero (NaN/inf would poison
+                # downstream diversity scores).
+                stats[col] = {
+                    'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0,
+                    'median': 0.0, 'q25': 0.0, 'q75': 0.0, 'count': 0,
+                }
+                continue
+            mean = acc['sum'] / count
+            variance = (acc['sum_sq'] / count) - (mean ** 2)
             std = np.sqrt(max(0, variance))
             
             values = np.array(acc['values'])

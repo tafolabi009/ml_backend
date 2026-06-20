@@ -116,15 +116,27 @@ class DatasetLoader:
             # Generic fallback - load small sample
             return self._get_generic_metadata(file_path, format_type)
     
-    def load_full(self, file_path: Union[str, Path]) -> pd.DataFrame:
+    def load_full(self, file_path: Union[str, Path], format_type: Optional[str] = None) -> pd.DataFrame:
         """
         Load entire dataset into memory.
         Use only for datasets that fit in RAM (<10GB typically).
+
+        Args:
+            file_path: Path to dataset file
+            format_type: Optional explicit format override (e.g. 'csv', 'parquet').
+                Falls back to extension-based detection if omitted or unrecognized.
         """
         file_path = Path(file_path)
-        format_type = self.detect_format(file_path)
-        
-        logger.info(f"Loading full dataset: {file_path.name}")
+        fmt: Optional[DatasetFormat] = None
+        if format_type:
+            try:
+                fmt = DatasetFormat(format_type.lower())
+            except ValueError:
+                logger.warning(f"Unknown format_type '{format_type}'; auto-detecting from extension")
+        if fmt is None:
+            fmt = self.detect_format(file_path)
+
+        logger.info(f"Loading full dataset: {file_path.name} ({fmt.value})")
         
         loaders = {
             DatasetFormat.CSV: lambda: pd.read_csv(file_path),
@@ -139,7 +151,7 @@ class DatasetLoader:
         }
         
         try:
-            df = loaders[format_type]()
+            df = loaders[fmt]()
             logger.info(f"Loaded {len(df):,} rows, {len(df.columns)} columns")
             return df
         except Exception as e:
@@ -154,12 +166,13 @@ class DatasetLoader:
         
         Args:
             file_path: Path to dataset file
-            format_type: Format type (for compatibility, will auto-detect)
-            
+            format_type: Explicit format override (e.g. 'csv'); falls back to
+                extension-based auto-detection if unrecognized.
+
         Returns:
             DataFrame with loaded data
         """
-        return self.load_full(file_path)
+        return self.load_full(file_path, format_type)
     
     def stream_chunks(
         self, 

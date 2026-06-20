@@ -22,6 +22,7 @@ from enum import Enum
 import logging
 from collections import defaultdict
 import json
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +252,15 @@ class AdvancedRecommendationEngine:
         
         # Impact prediction model
         self.impact_predictor = ImpactPredictor().to(self.device)
+        # Only trust the predictor once a real checkpoint is loaded. An untrained
+        # net has random weights and would emit meaningless, nondeterministic
+        # impact numbers; we fall back to deterministic heuristics until then.
+        self.impact_predictor_trained = False
         if model_path:
             try:
                 # SECURITY: weights_only=True prevents arbitrary code execution (CWE-502)
                 self.impact_predictor.load_state_dict(torch.load(model_path, map_location=self.device, weights_only=True))
+                self.impact_predictor_trained = True
                 logger.info(f"Loaded impact predictor from {model_path}")
             except Exception as e:
                 logger.warning(f"Could not load impact predictor: {e}")
@@ -668,8 +674,8 @@ class AdvancedRecommendationEngine:
         Predict impact of recommendation using ML model.
         Falls back to heuristics if model not trained.
         """
-        if self.enable_uncertainty:
-            # Use ML model
+        if self.enable_uncertainty and self.impact_predictor_trained:
+            # Use the ML model only when an actual trained checkpoint was loaded.
             features = self._create_impact_features(
                 recommendation, collapse_score, dimension_scores, dataset_size
             )
@@ -727,8 +733,10 @@ class AdvancedRecommendationEngine:
         """Create feature vector for impact prediction"""
         features = []
         
-        # Recommendation features
-        features.append(recommendation.category.value.__hash__() % 100 / 100.0)
+        # Recommendation features. Use a stable hash (str.__hash__ is salted per
+        # process via PYTHONHASHSEED, which made this feature nondeterministic).
+        cat_hash = int(hashlib.sha256(recommendation.category.value.encode()).hexdigest(), 16) % 100
+        features.append(cat_hash / 100.0)
         features.append(recommendation.priority.value / 4.0)
         features.append(recommendation.feasibility_score)
         features.append(recommendation.technical_complexity)
