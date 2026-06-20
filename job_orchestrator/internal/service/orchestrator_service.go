@@ -328,6 +328,11 @@ func (s *OrchestratorService) executeValidationJob(ctx context.Context, job *Job
 		return nil, fmt.Errorf("validation failed: %s", resp.ErrorMessage)
 	}
 
+	// Metrics is an optional proto sub-message; guard before dereferencing.
+	if resp.Metrics == nil {
+		return nil, fmt.Errorf("validation response missing metrics")
+	}
+
 	// Build result
 	result := map[string]string{
 		"status":           resp.Status,
@@ -376,6 +381,11 @@ func (s *OrchestratorService) executeCollapseJob(ctx context.Context, job *Job) 
 
 	if resp.ErrorMessage != "" {
 		return nil, fmt.Errorf("collapse detection failed: %s", resp.ErrorMessage)
+	}
+
+	// Score is an optional proto sub-message; guard before dereferencing.
+	if resp.Score == nil {
+		return nil, fmt.Errorf("collapse response missing score")
 	}
 
 	// Build result
@@ -461,6 +471,11 @@ func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, j
 
 	if resp.Status == "failed" {
 		return nil, fmt.Errorf("diversity analysis failed: %s", resp.ErrorMessage)
+	}
+
+	// Score is an optional proto sub-message; guard before dereferencing.
+	if resp.Score == nil {
+		return nil, fmt.Errorf("diversity response missing score")
 	}
 
 	result := map[string]string{
