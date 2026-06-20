@@ -518,8 +518,9 @@ func RefreshTokenFiber(c *fiber.Ctx) error {
 
 	userRepo := repository.NewUserRepository(database.GetDB())
 
-	// Check if token is blacklisted
-	if userRepo.IsTokenBlacklisted(ctx, auth.HashToken(req.RefreshToken)) {
+	// Check if token is blacklisted. Fail closed on a lookup error.
+	blacklisted, blErr := userRepo.IsTokenBlacklisted(ctx, auth.HashToken(req.RefreshToken))
+	if blErr != nil || blacklisted {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "TOKEN_REVOKED",
@@ -1137,17 +1138,20 @@ func VerifyEmailFiber(c *fiber.Ctx) error {
 	// Update last login
 	_, _ = db.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, userID)
 
-	// Send welcome email (best-effort)
+	// Send welcome email (best-effort) to the authoritative, normalized address.
 	go func() {
 		emailClient := email.GetClient()
 		if emailClient.IsConfigured() {
-			var fullName string
+			var fullName, userEmail string
 			database.GetDB().QueryRow(context.Background(),
-				`SELECT COALESCE(full_name, '') FROM users WHERE id = $1`, userID,
-			).Scan(&fullName)
+				`SELECT COALESCE(full_name, ''), email FROM users WHERE id = $1`, userID,
+			).Scan(&fullName, &userEmail)
+			if userEmail == "" {
+				userEmail = req.Email
+			}
 			subject, html := email.WelcomeEmail(fullName)
-			if err := emailClient.Send(req.Email, subject, html); err != nil {
-				log.Printf("Failed to send welcome email to %s: %v", req.Email, err)
+			if err := emailClient.Send(userEmail, subject, html); err != nil {
+				log.Printf("Failed to send welcome email to %s: %v", userEmail, err)
 			}
 		}
 	}()

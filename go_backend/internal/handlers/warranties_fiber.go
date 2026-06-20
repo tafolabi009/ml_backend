@@ -51,20 +51,22 @@ func RequestWarrantyFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	if validation.WarrantyEligible == nil || !*validation.WarrantyEligible {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fiber.Map{
-				"code":    "NOT_ELIGIBLE",
-				"message": "This validation is not eligible for warranty",
-			},
-		})
-	}
-
+	// Check ownership BEFORE eligibility so a user cannot probe other users'
+	// validations for existence/eligibility via distinguishable responses.
 	if validation.UserID != userID {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "FORBIDDEN",
 				"message": "You do not have access to this validation",
+			},
+		})
+	}
+
+	if validation.WarrantyEligible == nil || !*validation.WarrantyEligible {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":    "NOT_ELIGIBLE",
+				"message": "This validation is not eligible for warranty",
 			},
 		})
 	}

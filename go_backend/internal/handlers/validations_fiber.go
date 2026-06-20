@@ -25,6 +25,12 @@ import (
 // Package-level validation gRPC client
 var validationGRPCClient *grpcclient.ValidationClient
 
+// validationWorkerSem bounds the number of concurrent async validation-processing
+// goroutines. Without it, each request spawned an unbounded goroutine running
+// multi-minute gRPC calls, growing goroutine and DB-connection counts without
+// limit under load. Acquiring blocks (backpressure) rather than dropping work.
+var validationWorkerSem = make(chan struct{}, 16)
+
 // SetValidationClient sets the package-level validation gRPC client for use by standalone handler functions.
 func SetValidationClient(client *grpcclient.ValidationClient) {
 	validationGRPCClient = client
@@ -661,8 +667,11 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		"validation_type": validationType,
 	})
 
-	// Dispatch async ML processing
+	// Dispatch async ML processing (bounded by validationWorkerSem)
 	go func() {
+		validationWorkerSem <- struct{}{}
+		defer func() { <-validationWorkerSem }()
+
 		db := database.GetDB()
 		if validationGRPCClient == nil {
 			log.Printf("No validation gRPC client - using simulated ML processing for %s", validationID)
@@ -1037,9 +1046,19 @@ func GetValidationReportFiber(c *fiber.Ctx) error {
 		if validation.WarrantyEligible != nil {
 			we = *validation.WarrantyEligible
 		}
+		// A validation can be marked completed while risk_score/risk_level are NULL
+		// (e.g. a partial async write); guard the dereferences to avoid a panic.
+		rs := 0
+		if validation.RiskScore != nil {
+			rs = *validation.RiskScore
+		}
+		rl := "unknown"
+		if validation.RiskLevel != nil {
+			rl = *validation.RiskLevel
+		}
 		reportResults = &models.ValidationResults{
-			RiskScore: *validation.RiskScore,
-			RiskLevel: *validation.RiskLevel,
+			RiskScore: rs,
+			RiskLevel: rl,
 			PredictedPerformance: models.PredictedPerformance{
 				Accuracy:           0.87,
 				ConfidenceInterval: []float64{0.84, 0.90},

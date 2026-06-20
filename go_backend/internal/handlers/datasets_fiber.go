@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -62,6 +63,16 @@ func (h *DatasetHandler) InitiateUploadFiber(c *fiber.Ctx) error {
 				"code":    "INVALID_REQUEST",
 				"message": err.Error(),
 			},
+		})
+	}
+
+	// Sanitize the client-supplied filename to its base component so it cannot
+	// contain path separators or "../" sequences that would let the upload escape
+	// the user's {userID}/ storage namespace.
+	req.Filename = filepath.Base(req.Filename)
+	if req.Filename == "." || req.Filename == ".." || req.Filename == "/" || req.Filename == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INVALID_REQUEST", "message": "Invalid filename"},
 		})
 	}
 

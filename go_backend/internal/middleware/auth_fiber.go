@@ -69,7 +69,9 @@ func AuthRequiredFiber() fiber.Handler {
 		defer cancel()
 
 		userRepo := repository.NewUserRepository(database.GetDB())
-		if userRepo.IsTokenBlacklisted(ctx, auth.HashToken(token)) {
+		blacklisted, blErr := userRepo.IsTokenBlacklisted(ctx, auth.HashToken(token))
+		if blErr != nil || blacklisted {
+			// Fail closed: if we cannot verify the token is not revoked, deny.
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": fiber.Map{
 					"code":    "TOKEN_REVOKED",
