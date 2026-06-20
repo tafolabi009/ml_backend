@@ -110,7 +110,7 @@ func RedeemPromoCodeFiber(c *fiber.Ctx) error {
 		     lifetime_purchased = credit_balances.lifetime_purchased + $3,
 		     updated_at = CURRENT_TIMESTAMP
 		 RETURNING balance`,
-		"cb_"+userID[:8], userID, creditsGrant,
+		"cb_"+userID, userID, creditsGrant,
 	).Scan(&newBalance)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -165,12 +165,12 @@ func RedeemPromoCodeFiber(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"success":        true,
-		"code":           req.Code,
+		"success":         true,
+		"code":            req.Code,
 		"credits_granted": creditsGrant,
-		"new_balance":    newBalance,
-		"description":    description,
-		"message":        fmt.Sprintf("Successfully redeemed! %d credits added to your account.", creditsGrant),
+		"new_balance":     newBalance,
+		"description":     description,
+		"message":         fmt.Sprintf("Successfully redeemed! %d credits added to your account.", creditsGrant),
 	})
 }
 

@@ -26,7 +26,7 @@ func (r *CreditRepository) GetOrCreateBalance(ctx context.Context, userID string
 		 VALUES ($1, $2, 0, 0, 0)
 		 ON CONFLICT (user_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
 		 RETURNING id, user_id, balance, lifetime_purchased, lifetime_used, created_at, updated_at`,
-		"cb_"+userID[:8], userID,
+		"cb_"+userID, userID,
 	).Scan(&balance.ID, &balance.UserID, &balance.Balance, &balance.LifetimePurchased,
 		&balance.LifetimeUsed, &balance.CreatedAt, &balance.UpdatedAt)
 	if err != nil {
@@ -68,7 +68,7 @@ func (r *CreditRepository) AddCredits(ctx context.Context, userID string, amount
 		     lifetime_purchased = credit_balances.lifetime_purchased + $3,
 		     updated_at = CURRENT_TIMESTAMP
 		 RETURNING balance`,
-		"cb_"+userID[:8], userID, amount,
+		"cb_"+userID, userID, amount,
 	).Scan(&newBalance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update credit balance: %w", err)

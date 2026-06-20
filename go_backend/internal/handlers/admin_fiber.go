@@ -19,8 +19,14 @@ func logAdminAction(adminID, action, targetID, details string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	db := database.GetDB()
+	// Build the details payload with json.Marshal so values containing quotes or
+	// other JSON-special characters cannot corrupt or forge the audit record.
+	detailsJSON, err := json.Marshal(map[string]string{"target": targetID, "details": details})
+	if err != nil {
+		detailsJSON = []byte("{}")
+	}
 	db.Exec(ctx, `INSERT INTO security_events (user_id, event_type, success, details, created_at) VALUES ($1, $2, true, $3, NOW())`,
-		adminID, action, fmt.Sprintf(`{"target": "%s", "details": "%s"}`, targetID, details))
+		adminID, action, string(detailsJSON))
 }
 
 // GetSystemOverviewFiber returns system-wide statistics for admin dashboard
@@ -63,12 +69,12 @@ func GetSystemOverviewFiber(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"total_users":            totalUsers,
-		"total_validations":      totalValidations,
-		"total_datasets":         totalDatasets,
+		"total_users":             totalUsers,
+		"total_validations":       totalValidations,
+		"total_datasets":          totalDatasets,
 		"total_credits_purchased": totalCreditsPurchased,
-		"active_jobs":            activeJobs,
-		"users_by_role":          roleCounts,
+		"active_jobs":             activeJobs,
+		"users_by_role":           roleCounts,
 	})
 }
 
@@ -1010,9 +1016,9 @@ func UpdatePlatformSettingsFiber(c *fiber.Ctx) error {
 	}
 
 	knownKeys := map[string]bool{
-		"registration_enabled": true,
-		"maintenance_mode":     true,
-		"max_upload_size_gb":   true,
+		"registration_enabled":   true,
+		"maintenance_mode":       true,
+		"max_upload_size_gb":     true,
 		"default_signup_credits": true,
 		"allowed_email_domains":  true,
 	}

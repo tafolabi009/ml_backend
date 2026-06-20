@@ -29,6 +29,15 @@ func SetTOTPIssuer(issuer string) {
 	totpIssuer = issuer
 }
 
+// Token types distinguish short-lived access tokens from long-lived refresh
+// tokens so that a refresh token cannot be replayed as a bearer access token
+// (and vice-versa). Tokens issued before this field existed have an empty
+// TokenType and are accepted on both paths for backward compatibility.
+const (
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
+)
+
 // Claims represents JWT claims with extended user information
 type Claims struct {
 	UserID    string `json:"user_id"`
@@ -37,6 +46,7 @@ type Claims struct {
 	CompanyID string `json:"company_id"`
 	Role      string `json:"role,omitempty"`
 	SessionID string `json:"session_id,omitempty"` // For session tracking
+	TokenType string `json:"token_type,omitempty"` // "access" or "refresh"
 	jwt.RegisteredClaims
 }
 
@@ -45,8 +55,18 @@ func GenerateToken(userID, email, companyID string, expiresIn time.Duration) (st
 	return GenerateTokenWithClaims(userID, email, "", companyID, "", "", expiresIn)
 }
 
-// GenerateTokenWithClaims creates a JWT with full claims
+// GenerateTokenWithClaims creates an access JWT with full claims
 func GenerateTokenWithClaims(userID, email, username, companyID, role, sessionID string, expiresIn time.Duration) (string, error) {
+	return generateToken(userID, email, username, companyID, role, sessionID, TokenTypeAccess, expiresIn)
+}
+
+// GenerateRefreshToken creates a refresh JWT. Refresh tokens are rejected by the
+// access-token middleware, so a leaked refresh token cannot be used as a bearer.
+func GenerateRefreshToken(userID, email, username, companyID, role, sessionID string, expiresIn time.Duration) (string, error) {
+	return generateToken(userID, email, username, companyID, role, sessionID, TokenTypeRefresh, expiresIn)
+}
+
+func generateToken(userID, email, username, companyID, role, sessionID, tokenType string, expiresIn time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:    userID,
@@ -55,6 +75,7 @@ func GenerateTokenWithClaims(userID, email, username, companyID, role, sessionID
 		CompanyID: companyID,
 		Role:      role,
 		SessionID: sessionID,
+		TokenType: tokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiresIn)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -81,7 +102,7 @@ func GenerateTokenPair(userID, email string) (*TokenPair, error) {
 		return nil, err
 	}
 
-	refreshToken, err := GenerateToken(userID, email, "", 7*24*time.Hour)
+	refreshToken, err := GenerateRefreshToken(userID, email, "", "", "", "", 7*24*time.Hour)
 	if err != nil {
 		return nil, err
 	}
