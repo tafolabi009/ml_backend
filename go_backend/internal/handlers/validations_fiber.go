@@ -636,6 +636,11 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 	validationRepo := repository.NewValidationRepository(database.GetDB())
 	if err := validationRepo.Create(ctx, &validation); err != nil {
 		log.Printf("Failed to create validation: %v", err)
+		// Credits were already deducted above; refund them so the user is not
+		// charged for a validation job that was never created.
+		refundDesc := fmt.Sprintf("Refund for failed validation creation %s", validationID)
+		refundType := "validation_refund"
+		_, _ = creditRepo.AddCredits(ctx, userID, creditCost.CreditsRequired, "refund", refundDesc, &refundType, &validationID)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "DATABASE_ERROR",
@@ -1358,17 +1363,31 @@ func CancelValidationFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Cancel the validation
+	// Atomically transition to cancelled only if still cancellable. RowsAffected
+	// tells us whether THIS request performed the cancellation, which makes the
+	// refund below idempotent under concurrent or retried cancel calls.
 	now := time.Now()
-	validation.Status = "cancelled"
-	validation.CompletedAt = &now
 	errMsg := "Cancelled by user"
-	validation.ErrorMessage = &errMsg
-	if err := validationRepo.Update(ctx, validation); err != nil {
+	tag, err := database.GetDB().Exec(ctx,
+		`UPDATE validations
+		 SET status = 'cancelled', completed_at = $2, error_message = $3
+		 WHERE id = $1 AND status IN ('queued', 'processing')`,
+		validationID, now, errMsg)
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "DATABASE_ERROR",
 				"message": "Failed to cancel validation",
+			},
+		})
+	}
+	if tag.RowsAffected() == 0 {
+		// A concurrent request already cancelled/completed it; do not refund again.
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":           "INVALID_STATUS",
+				"message":        "Only queued or processing validations can be cancelled",
+				"current_status": validation.Status,
 			},
 		})
 	}

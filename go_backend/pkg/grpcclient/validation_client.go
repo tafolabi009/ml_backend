@@ -60,11 +60,14 @@ func NewValidationClient(addr string) (*ValidationClient, error) {
 // TrainCascade initiates cascade training with circuit breaker protection
 func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath string, config *pb.CascadeConfig) (*pb.TrainCascadeResponse, error) {
 	traceID := ctx.Value("trace_id")
+	// Use a request-local logger; mutating the shared v.log field from concurrent
+	// request goroutines is a data race and leaks trace IDs across requests.
+	log := v.log
 	if traceID != nil {
-		v.log = v.log.With("trace_id", traceID)
+		log = log.With("trace_id", traceID)
 	}
 
-	v.log.Info("Initiating cascade training", "job_id", jobID, "dataset", datasetPath)
+	log.Info("Initiating cascade training", "job_id", jobID, "dataset", datasetPath)
 
 	// Add trace ID to metadata
 	md := metadata.New(map[string]string{
@@ -82,7 +85,7 @@ func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath 
 
 		resp, err := v.client.TrainCascade(ctx, req)
 		if err != nil {
-			v.log.Error("Cascade training failed", "error", err, "job_id", jobID)
+			log.Error("Cascade training failed", "error", err, "job_id", jobID)
 			return nil, err
 		}
 
@@ -94,7 +97,7 @@ func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath 
 	}
 
 	response := result.(*pb.TrainCascadeResponse)
-	v.log.Info("Cascade training completed",
+	log.Info("Cascade training completed",
 		"job_id", jobID,
 		"status", response.Status,
 		"models", len(response.Results),
@@ -106,11 +109,13 @@ func (v *ValidationClient) TrainCascade(ctx context.Context, jobID, datasetPath 
 // AnalyzeDiversity performs diversity analysis with circuit breaker
 func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetPath string, config *pb.DiversityConfig) (*pb.AnalyzeDiversityResponse, error) {
 	traceID := ctx.Value("trace_id")
+	// Request-local logger (see TrainCascade) to avoid racing on the shared field.
+	log := v.log
 	if traceID != nil {
-		v.log = v.log.With("trace_id", traceID)
+		log = log.With("trace_id", traceID)
 	}
 
-	v.log.Info("Starting diversity analysis", "job_id", jobID, "dataset", datasetPath)
+	log.Info("Starting diversity analysis", "job_id", jobID, "dataset", datasetPath)
 
 	// Add trace ID to metadata
 	md := metadata.New(map[string]string{
@@ -127,7 +132,7 @@ func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetP
 
 		resp, err := v.client.AnalyzeDiversity(ctx, req)
 		if err != nil {
-			v.log.Error("Diversity analysis failed", "error", err, "job_id", jobID)
+			log.Error("Diversity analysis failed", "error", err, "job_id", jobID)
 			return nil, err
 		}
 
@@ -139,9 +144,13 @@ func (v *ValidationClient) AnalyzeDiversity(ctx context.Context, jobID, datasetP
 	}
 
 	response := result.(*pb.AnalyzeDiversityResponse)
-	v.log.Info("Diversity analysis completed",
+	var overallScore float32
+	if response.Score != nil {
+		overallScore = response.Score.OverallScore
+	}
+	log.Info("Diversity analysis completed",
 		"job_id", jobID,
-		"score", response.Score.OverallScore,
+		"score", overallScore,
 	)
 
 	return response, nil

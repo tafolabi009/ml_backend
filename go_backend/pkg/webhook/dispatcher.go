@@ -7,12 +7,89 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
 )
+
+// --- SSRF protection --------------------------------------------------------
+// Webhook targets are user-supplied URLs. Without restrictions a user could
+// point a webhook at internal infrastructure (cloud metadata at 169.254.169.254,
+// localhost, RFC1918 hosts) and use the server as an SSRF proxy. We reject such
+// targets both at creation time and — authoritatively, to defeat DNS rebinding —
+// at dial time against the resolved IP.
+
+// isBlockedIP reports whether an IP must never be reached by an outbound webhook.
+func isBlockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	// CGNAT 100.64.0.0/10 (not covered by IsPrivate).
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+		return true
+	}
+	return false
+}
+
+// ValidateWebhookURL performs fast, creation-time validation of a webhook URL.
+func ValidateWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL")
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("webhook URL must use HTTPS")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("webhook URL must include a host")
+	}
+	if strings.EqualFold(host, "localhost") {
+		return fmt.Errorf("webhook URL host is not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil && isBlockedIP(ip) {
+		return fmt.Errorf("webhook URL host is not allowed")
+	}
+	return nil
+}
+
+// newSafeHTTPClient returns an http.Client whose dialer rejects connections to
+// blocked IPs. The check runs after DNS resolution on the actual dial address,
+// so it also defends against DNS-rebinding attacks.
+func newSafeHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: timeout,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if isBlockedIP(net.ParseIP(host)) {
+				return fmt.Errorf("blocked webhook target address: %s", address)
+			}
+			return nil
+		},
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext:         dialer.DialContext,
+			TLSHandshakeTimeout: timeout,
+		},
+	}
+}
 
 // Event represents a webhook event payload
 type Event struct {
@@ -81,7 +158,7 @@ func deliverWebhook(webhookID, url, secret string, payload []byte, eventType str
 	req.Header.Set("X-Synthos-Signature", signature)
 	req.Header.Set("X-Synthos-Event", eventType)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newSafeHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	duration := int(time.Since(start).Milliseconds())
 
