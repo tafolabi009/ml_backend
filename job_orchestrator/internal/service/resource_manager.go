@@ -77,11 +77,13 @@ func (rm *ResourceManager) CanAcceptJob() bool {
 		return false
 	}
 
-	// Check CPU and memory headroom (keep 20% reserve)
+	// Check CPU and memory headroom (keep 20% reserve on BOTH resources).
+	// Must be AND: accepting a job when only one of CPU/memory has headroom
+	// over-admits and leads to allocation failures / OOM.
 	cpuAvailable := float64(rm.totalCPUs-rm.allocatedCPUs) / float64(rm.totalCPUs)
 	memoryAvailable := float64(rm.totalMemoryMB-rm.allocatedMemory) / float64(rm.totalMemoryMB)
 
-	return cpuAvailable > 0.2 || memoryAvailable > 0.2
+	return cpuAvailable > 0.2 && memoryAvailable > 0.2
 }
 
 // AllocateResources allocates resources for a job
