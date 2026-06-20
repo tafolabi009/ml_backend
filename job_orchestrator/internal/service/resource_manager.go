@@ -2,7 +2,10 @@ package service
 
 import (
 	"log"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,14 +43,37 @@ type ResourceManager struct {
 	startTime          time.Time
 }
 
+// detectSystemMemoryMB returns the memory budget for job scheduling. It prefers
+// the ORCHESTRATOR_MEMORY_MB override (set this to the container/cgroup limit in
+// containerized deployments), then falls back to the host's MemTotal, then to a
+// conservative default. Note: the previous implementation used runtime.MemStats.Sys
+// (the Go runtime's own reservation, ~tens of MB), which made the scheduler reject
+// the first real job because requested memory exceeded that tiny budget.
+func detectSystemMemoryMB() int {
+	if v := os.Getenv("ORCHESTRATOR_MEMORY_MB"); v != "" {
+		if mb, err := strconv.Atoi(v); err == nil && mb > 0 {
+			return mb
+		}
+	}
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "MemTotal:") {
+				if fields := strings.Fields(line); len(fields) >= 2 {
+					if kb, err := strconv.Atoi(fields[1]); err == nil && kb > 0 {
+						return kb / 1024
+					}
+				}
+			}
+		}
+	}
+	return 8192 // conservative default (8 GB)
+}
+
 // NewResourceManager creates a new resource manager
 func NewResourceManager(workers int) *ResourceManager {
 	numCPU := runtime.NumCPU()
 
-	// Get system memory (simplified - in production use actual system info)
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	totalMemoryMB := int(m.Sys / 1024 / 1024)
+	totalMemoryMB := detectSystemMemoryMB()
 
 	// Detect GPUs (simplified - in production use nvidia-smi or similar)
 	totalGPUs := detectGPUs()

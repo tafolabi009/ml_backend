@@ -20,29 +20,29 @@ func generateJobID() string {
 type JobStatus string
 
 const (
-	StatusQueued     JobStatus = "queued"
-	StatusRunning    JobStatus = "running"
-	StatusCompleted  JobStatus = "completed"
-	StatusFailed     JobStatus = "failed"
-	StatusCancelled  JobStatus = "cancelled"
+	StatusQueued    JobStatus = "queued"
+	StatusRunning   JobStatus = "running"
+	StatusCompleted JobStatus = "completed"
+	StatusFailed    JobStatus = "failed"
+	StatusCancelled JobStatus = "cancelled"
 )
 
 // Job represents a job in the system
 type Job struct {
-	ID               string
-	UserID           string
-	JobType          string
-	Status           JobStatus
-	Priority         int32
-	Payload          map[string]string
-	Result           map[string]string
-	ErrorMessage     string
-	Progress         float32
-	CreatedAt        time.Time
-	StartedAt        *time.Time
-	CompletedAt      *time.Time
-	RetryCount       int
-	MaxRetries       int
+	ID           string
+	UserID       string
+	JobType      string
+	Status       JobStatus
+	Priority     int32
+	Payload      map[string]string
+	Result       map[string]string
+	ErrorMessage string
+	Progress     float32
+	CreatedAt    time.Time
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+	RetryCount   int
+	MaxRetries   int
 }
 
 // JobQueue manages job scheduling and execution
@@ -52,6 +52,7 @@ type JobQueue struct {
 	queue        []*Job
 	workers      int
 	stopChan     chan struct{}
+	stopOnce     sync.Once
 	workerChan   chan *Job
 	jobCompleted chan string
 	jobCallbacks map[string]JobExecutor // Map of job type to executor
@@ -132,7 +133,11 @@ func (jq *JobQueue) GetJob(jobID string) (*Job, error) {
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 
-	return job, nil
+	// Return a snapshot taken under the lock. Callers read job fields (Status,
+	// Progress, Result, ...) that worker goroutines mutate under the same lock;
+	// handing out the shared pointer would be a data race.
+	jobCopy := *job
+	return &jobCopy, nil
 }
 
 // ListJobs returns jobs for a user with optional status filter
@@ -150,7 +155,7 @@ func (jq *JobQueue) ListJobs(userID string, statusFilter JobStatus, page, pageSi
 	}
 
 	totalCount := len(filtered)
-	
+
 	// Pagination
 	start := (page - 1) * pageSize
 	end := start + pageSize
@@ -199,6 +204,12 @@ func (jq *JobQueue) UpdateJobStatus(jobID string, status JobStatus, result map[s
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
+	// Never transition out of a terminal state. In particular, a cancellation
+	// must win over a worker that completes/fails the job immediately afterwards.
+	if job.Status == StatusCancelled || job.Status == StatusCompleted || job.Status == StatusFailed {
+		return nil
+	}
+
 	job.Status = status
 	job.Progress = progress
 	if result != nil {
@@ -221,15 +232,11 @@ func (jq *JobQueue) UpdateJobStatus(jobID string, status JobStatus, result map[s
 	return nil
 }
 
-// sortQueue sorts queue by priority (higher first)
+// sortQueue sorts queue by priority (higher first). Caller must hold jq.mu.
 func (jq *JobQueue) sortQueue() {
-	for i := 0; i < len(jq.queue); i++ {
-		for j := i + 1; j < len(jq.queue); j++ {
-			if jq.queue[j].Priority > jq.queue[i].Priority {
-				jq.queue[i], jq.queue[j] = jq.queue[j], jq.queue[i]
-			}
-		}
-	}
+	sort.Slice(jq.queue, func(i, j int) bool {
+		return jq.queue[i].Priority > jq.queue[j].Priority
+	})
 }
 
 // removeFromQueue removes a job from the queue
@@ -257,7 +264,7 @@ func (jq *JobQueue) processQueue() {
 				// Get highest priority job
 				job := jq.queue[0]
 				jq.queue = jq.queue[1:]
-				
+
 				// Send to worker
 				select {
 				case jq.workerChan <- job:
@@ -276,7 +283,7 @@ func (jq *JobQueue) processQueue() {
 // worker processes jobs from the worker channel
 func (jq *JobQueue) worker(id int) {
 	log.Printf("Worker %d started", id)
-	
+
 	for {
 		select {
 		case <-jq.stopChan:
@@ -310,20 +317,28 @@ func (jq *JobQueue) executeJob(job *Job) {
 
 	// Execute job
 	result, err := executor(ctx, job)
-	
+
 	if err != nil {
 		log.Printf("Job %s failed: %v", job.ID, err)
-		
-		// Retry logic
+
+		// Retry logic. RetryCount/MaxRetries and Status are read and written under
+		// the lock to avoid racing with other goroutines.
+		jq.mu.Lock()
+		if job.Status == StatusCancelled {
+			// Cancelled while running: honor the cancellation, do not retry.
+			jq.mu.Unlock()
+			return
+		}
 		if job.RetryCount < job.MaxRetries {
-			jq.mu.Lock()
 			job.RetryCount++
 			job.Status = StatusQueued
 			jq.queue = append(jq.queue, job)
 			jq.sortQueue()
+			retryCount, maxRetries := job.RetryCount, job.MaxRetries
 			jq.mu.Unlock()
-			log.Printf("Job %s queued for retry (%d/%d)", job.ID, job.RetryCount, job.MaxRetries)
+			log.Printf("Job %s queued for retry (%d/%d)", job.ID, retryCount, maxRetries)
 		} else {
+			jq.mu.Unlock()
 			jq.UpdateJobStatus(job.ID, StatusFailed, nil, err.Error(), 0)
 		}
 	} else {
@@ -332,10 +347,12 @@ func (jq *JobQueue) executeJob(job *Job) {
 	}
 }
 
-// Stop gracefully stops the job queue
+// Stop gracefully stops the job queue. Safe to call more than once.
 func (jq *JobQueue) Stop() {
-	close(jq.stopChan)
-	log.Println("Job queue stopped")
+	jq.stopOnce.Do(func() {
+		close(jq.stopChan)
+		log.Println("Job queue stopped")
+	})
 }
 
 // GetQueueStats returns queue statistics
