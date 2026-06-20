@@ -1,29 +1,35 @@
-# Go backend binaries
+# Go binaries (compiled artifacts must never be committed)
 go_backend/api
-go_backend/*.exe
-go_backend/*.dll
-go_backend/*.so
-go_backend/*.dylib
+go_backend/api-server
+go_backend/cmd/api/api
+data_service/data-service
+job_orchestrator/job-orchestrator
+admin_dashboard/admin_dashboard
+*.exe
+*.dll
+*.so
+*.dylib
 
 # Go test coverage
-go_backend/coverage.out
-go_backend/coverage.html
+coverage.out
+coverage.html
 
-# Python
-ml_backend/__pycache__/
-ml_backend/*.py[cod]
-ml_backend/*$py.class
-ml_backend/*.so
-ml_backend/.Python
-ml_backend/venv/
-ml_backend/env/
-ml_backend/.venv
-ml_backend/.pytest_cache/
-ml_backend/.coverage
-ml_backend/htmlcov/
-ml_backend/*.egg-info/
-ml_backend/dist/
-ml_backend/build/
+# Python (applies to all services: ml_backend, collapse_service, validation_service, ...)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+.venv
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+*.egg-info/
+dist/
+build/
+coverage.xml
 
 # ML artifacts (download during build)
 *.whl
