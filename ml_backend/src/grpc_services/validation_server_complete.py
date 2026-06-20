@@ -157,14 +157,14 @@ except ImportError:
 try:
     from src.orchestrator import SynthosOrchestrator, ValidationResult
     from src.validation_engine.diversity_analyzer import DiversityAnalyzer
-    from src.collapse_engine.detector import CollapseDetector
-    from src.collapse_engine.localizer import CollapseLocalizer
+    from src.collapse_engine.detector import CollapseDetector, CollapseConfig
+    from src.collapse_engine.localizer import CollapseLocalizer, LocalizationConfig
     from src.collapse_engine.recommender import RecommendationEngine
 except ImportError:
     from orchestrator import SynthosOrchestrator, ValidationResult
     from validation_engine.diversity_analyzer import DiversityAnalyzer
-    from collapse_engine.detector import CollapseDetector
-    from collapse_engine.localizer import CollapseLocalizer
+    from collapse_engine.detector import CollapseDetector, CollapseConfig
+    from collapse_engine.localizer import CollapseLocalizer, LocalizationConfig
     from collapse_engine.recommender import RecommendationEngine
 
 logger = logging.getLogger(__name__)
@@ -439,10 +439,15 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
     
     def __init__(self, config: dict):
         self.config = config
-        
-        # Initialize collapse detector
-        self.detector = CollapseDetector(config)
-        self.localizer = CollapseLocalizer(config)
+
+        # CollapseDetector and CollapseLocalizer require typed config dataclasses
+        # (CollapseConfig / LocalizationConfig), NOT the raw service dict. Passing
+        # the dict here raised AttributeError on `config.use_gpu` at startup.
+        use_gpu = bool(config.get('use_gpu', True)) if isinstance(config, dict) else True
+
+        # Initialize collapse detector and localizer with their proper configs
+        self.detector = CollapseDetector(CollapseConfig(use_gpu=use_gpu))
+        self.localizer = CollapseLocalizer(LocalizationConfig(use_gpu=use_gpu))
         self.recommender = RecommendationEngine()  # No config needed
         
         # Cache for sharing results between stages
@@ -738,12 +743,17 @@ class CollapseEngineServicer(validation_pb2_grpc.CollapseEngineServicer):
 # Server Setup
 # ============================================================================
 
+# Resolve config defaults relative to the ml_backend package (or ML_CONFIG_DIR),
+# instead of a hardcoded /workspaces dev path that does not exist in containers.
+_DEFAULT_CONFIG_DIR = Path(os.getenv("ML_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "config")))
+
+
 async def serve(
     port: int = 50051,
     use_mtls: bool = os.getenv('ENABLE_MTLS', 'true').lower() == 'true',  # SECURITY: mTLS enabled by default in production
     cert_dir: Path = Path("/etc/synthos/certs"),
-    config_path: Path = Path("/workspaces/ml_backend/config/ml_config.yaml"),
-    hardware_config_path: Path = Path("/workspaces/ml_backend/config/hardware_config.yaml")
+    config_path: Path = _DEFAULT_CONFIG_DIR / "ml_config.yaml",
+    hardware_config_path: Path = _DEFAULT_CONFIG_DIR / "hardware_config.yaml"
 ):
     """
     Start the complete gRPC server with real orchestrator integration.

@@ -672,17 +672,26 @@ class SynthosOrchestrator:
         
         # Only localize if we found issues
         if collapse_result.overall_score < self.collapse_threshold:
+            # localize_collapse expects an np.ndarray and Dict[str, float]. Convert
+            # the torch tensor, and extract numeric scores from the DimensionScore
+            # objects in collapse_result.dimensions.
+            data_np = data_tensor.detach().cpu().numpy() if hasattr(data_tensor, "detach") else np.asarray(data_tensor)
+            dimension_scores = {
+                name: (dim.score if hasattr(dim, "score") else float(dim))
+                for name, dim in collapse_result.dimensions.items()
+            }
             localization_result = await self.collapse_localizer.localize_collapse(
-                dataset=data_tensor,
-                collapse_dimensions=collapse_result.dimensions
+                data=data_np,
+                collapse_dimensions=dimension_scores,
             )
-            
-            problematic_rows = localization_result['problematic_indices']
-            
+
+            problematic_rows = localization_result.problematic_indices
+
             if stream_progress:
                 print(f"🎯 Identified {len(problematic_rows):,} problematic rows")
-                print(f"   - Top issue: {localization_result['top_contributors'][0]}")
-                print(f"   - Severity: {localization_result['severity']}")
+                if localization_result.recommendations:
+                    print(f"   - Top issue: {localization_result.recommendations[0]}")
+                print(f"   - Problematic rows: {localization_result.percentage_problematic:.1f}%")
         else:
             problematic_rows = []
             if stream_progress:

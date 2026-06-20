@@ -146,14 +146,18 @@ func (r *UserRepository) BlacklistToken(ctx context.Context, tokenHash, userID s
 	return err
 }
 
-// IsTokenBlacklisted checks if a token is blacklisted
-func (r *UserRepository) IsTokenBlacklisted(ctx context.Context, tokenHash string) bool {
+// IsTokenBlacklisted reports whether a token is blacklisted. The error is
+// returned so callers can fail closed: a swallowed DB error here previously
+// meant a revoked token was treated as valid (fail-open).
+func (r *UserRepository) IsTokenBlacklisted(ctx context.Context, tokenHash string) (bool, error) {
 	query := `
 		SELECT EXISTS(SELECT 1 FROM token_blacklist WHERE token_hash = $1 AND expires_at > NOW())
 	`
 	var exists bool
-	_ = r.db.QueryRow(ctx, query, tokenHash).Scan(&exists)
-	return exists
+	if err := r.db.QueryRow(ctx, query, tokenHash).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 // Password Reset Tokens

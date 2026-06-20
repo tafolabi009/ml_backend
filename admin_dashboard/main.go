@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +17,15 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/template/html/v2"
 )
+
+// checkOK returns an error if the HTTP response is not a 2xx status, so callers
+// don't silently decode a 4xx/5xx error body (often HTML) into an empty result.
+func checkOK(resp *http.Response) error {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("orchestrator returned status %d", resp.StatusCode)
+	}
+	return nil
+}
 
 type OrchestratorClient struct {
 	baseURL    string
@@ -41,6 +52,9 @@ func (c *OrchestratorClient) GetResourceStatus(ctx context.Context) (map[string]
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if err := checkOK(resp); err != nil {
+		return nil, err
+	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -61,6 +75,9 @@ func (c *OrchestratorClient) GetMetrics(ctx context.Context) (map[string]interfa
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if err := checkOK(resp); err != nil {
+		return nil, err
+	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -82,6 +99,9 @@ func (c *OrchestratorClient) ListJobs(ctx context.Context, page, pageSize int) (
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if err := checkOK(resp); err != nil {
+		return nil, err
+	}
 
 	var result struct {
 		Jobs []map[string]interface{} `json:"jobs"`
@@ -112,8 +132,16 @@ func main() {
 
 	adminPassword := os.Getenv("ADMIN_PASSWORD")
 	if adminPassword == "" {
-		adminPassword = "admin"
-		log.Println("WARNING: Using default admin password. Set ADMIN_PASSWORD environment variable.")
+		// Never ship a guessable default for an admin panel that proxies job and
+		// resource control. Generate a strong random password and log it once so
+		// the operator can use it; production should set ADMIN_PASSWORD explicitly.
+		buf := make([]byte, 24)
+		if _, err := rand.Read(buf); err != nil {
+			log.Fatalf("ADMIN_PASSWORD not set and failed to generate a random password: %v", err)
+		}
+		adminPassword = hex.EncodeToString(buf)
+		log.Printf("WARNING: ADMIN_PASSWORD not set; generated a random password for this session: %s", adminPassword)
+		log.Println("Set ADMIN_PASSWORD to a stable secret for production deployments.")
 	}
 
 	// Initialize orchestrator client

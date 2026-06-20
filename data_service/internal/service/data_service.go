@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
-	pb "github.com/tafolabi009/backend/proto/data"
-	stor "github.com/synthos/data-service/internal/storage"
 	repo "github.com/synthos/data-service/internal/repository"
+	stor "github.com/synthos/data-service/internal/storage"
+	pb "github.com/tafolabi009/backend/proto/data"
 )
 
 // DataServiceServer implements the DataService gRPC service
 type DataServiceServer struct {
 	pb.UnimplementedDataServiceServer
-	storagePath string
-	provider    stor.StorageProvider
+	storagePath  string
+	provider     stor.StorageProvider
 	metadataRepo *repo.MetadataRepository
 }
 
@@ -69,6 +69,12 @@ func (s *DataServiceServer) UploadDataset(stream pb.DataService_UploadDatasetSer
 				file.Close()
 			}
 
+			// A well-formed upload must begin with a metadata message; without it
+			// there is nothing to persist and the response below would nil-panic.
+			if metadata == nil {
+				return fmt.Errorf("upload stream closed before metadata was received")
+			}
+
 			// persist metadata.json beside file for compatibility
 			if metadata != nil {
 				metadata.FileSize = bytesReceived
@@ -85,6 +91,10 @@ func (s *DataServiceServer) UploadDataset(stream pb.DataService_UploadDatasetSer
 				_ = s.provider.WriteMetadata(filepath.Dir(metadata.StoragePath), metaObj)
 
 				if s.metadataRepo != nil {
+					custom := make(map[string]any, len(metadata.CustomMetadata))
+					for k, v := range metadata.CustomMetadata {
+						custom[k] = v
+					}
 					meta := repo.DatasetMetadata{
 						ID:          metadata.DatasetId,
 						UserID:      metadata.UserId,
@@ -93,7 +103,7 @@ func (s *DataServiceServer) UploadDataset(stream pb.DataService_UploadDatasetSer
 						FileType:    metadata.FileType,
 						StoragePath: metadata.StoragePath,
 						Status:      "ready",
-						Metadata:    metadata.CustomMetadata,
+						Metadata:    custom,
 					}
 					_ = s.metadataRepo.UpsertDataset(context.Background(), meta)
 				}
@@ -180,13 +190,13 @@ func (s *DataServiceServer) GetDatasetMetadata(ctx context.Context, req *pb.GetD
 	// Try provider metadata read
 	if m, err := s.provider.ReadMetadata(datasetDir); err == nil {
 		ds := &pb.Dataset{
-			Id:         req.DatasetId,
-			UserId:     req.UserId,
-			Filename:   toString(m["filename"]),
-			FileType:   toString(m["file_type"]),
+			Id:          req.DatasetId,
+			UserId:      req.UserId,
+			Filename:    toString(m["filename"]),
+			FileType:    toString(m["file_type"]),
 			StoragePath: toString(m["storage_path"]),
-			Status:     "ready",
-			UploadedAt: toString(m["uploaded_at"]),
+			Status:      "ready",
+			UploadedAt:  toString(m["uploaded_at"]),
 			ProcessedAt: toString(m["uploaded_at"]),
 		}
 		if v, ok := m["file_size"]; ok {
@@ -214,27 +224,33 @@ func (s *DataServiceServer) GetDatasetMetadata(ctx context.Context, req *pb.GetD
 		if f.IsDir() {
 			continue
 		}
-						if metadata != nil {
-							metadata.FileSize = bytesReceived
-							metaObj := map[string]interface{}{
-								"dataset_id":   metadata.DatasetId,
-								"user_id":      metadata.UserId,
-								"filename":     metadata.Filename,
-								"file_size":    bytesReceived,
-								"file_type":    metadata.FileType,
-								"storage_path": metadata.StoragePath,
-								"uploaded_at":  time.Now().UTC().Format(time.RFC3339),
-								"metadata":     metadata.CustomMetadata,
-							}
-							dsDir := filepath.Dir(metadata.StoragePath)
-							_ = s.provider.WriteMetadata(dsDir, metaObj)
-		FileSize:   fileInfo.Size(),
-							// update per-user index as well
-						}
-		FileType:   ext,
-		Status:     "ready",
+		fi, ferr := f.Info()
+		if ferr != nil {
+			continue
+		}
+		fileName = f.Name()
+		filePath = filepath.Join(datasetDir, fileName)
+		fileInfo = fi
+		break
+	}
+
+	if fileInfo == nil {
+		return &pb.GetDatasetResponse{ErrorMessage: "no files for dataset"}, nil
+	}
+
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	if ext == "" {
+		ext = "binary"
+	}
+	dataset := &pb.Dataset{
+		Id:          req.DatasetId,
+		UserId:      req.UserId,
+		Filename:    fileName,
+		FileSize:    fileInfo.Size(),
+		FileType:    ext,
+		Status:      "ready",
 		StoragePath: filePath,
-		UploadedAt: fileInfo.ModTime().Format(time.RFC3339),
+		UploadedAt:  fileInfo.ModTime().Format(time.RFC3339),
 		ProcessedAt: fileInfo.ModTime().Format(time.RFC3339),
 	}
 
@@ -295,12 +311,12 @@ func (s *DataServiceServer) ListDatasets(ctx context.Context, req *pb.ListDatase
 		var datasets []*pb.Dataset
 		for _, pe := range providerEntries {
 			datasets = append(datasets, &pb.Dataset{
-				Id:       pe.DatasetID,
-				UserId:   req.UserId,
-				Filename: pe.Filename,
-				FileSize: pe.FileSize,
-				FileType: pe.FileType,
-				Status:   "ready",
+				Id:         pe.DatasetID,
+				UserId:     req.UserId,
+				Filename:   pe.Filename,
+				FileSize:   pe.FileSize,
+				FileType:   pe.FileType,
+				Status:     "ready",
 				UploadedAt: pe.UploadedAt,
 			})
 		}
@@ -358,11 +374,11 @@ func (s *DataServiceServer) ListDatasets(ctx context.Context, req *pb.ListDatase
 			if jerr := json.Unmarshal(b, &m); jerr == nil {
 				// build dataset from metadata
 				ds := &pb.Dataset{
-					Id:       dsId,
-					UserId:   req.UserId,
-					Filename: toString(m["filename"]),
-					FileType: toString(m["file_type"]),
-					Status:   "ready",
+					Id:         dsId,
+					UserId:     req.UserId,
+					Filename:   toString(m["filename"]),
+					FileType:   toString(m["file_type"]),
+					Status:     "ready",
 					UploadedAt: toString(m["uploaded_at"]),
 				}
 				if v, ok := m["file_size"]; ok {
@@ -405,12 +421,12 @@ func (s *DataServiceServer) ListDatasets(ctx context.Context, req *pb.ListDatase
 		}
 
 		datasets = append(datasets, &pb.Dataset{
-			Id:       dsId,
-			UserId:   req.UserId,
-			Filename: fileName,
-			FileSize: fileInfo.Size(),
-			FileType: ext,
-			Status:   "ready",
+			Id:         dsId,
+			UserId:     req.UserId,
+			Filename:   fileName,
+			FileSize:   fileInfo.Size(),
+			FileType:   ext,
+			Status:     "ready",
 			UploadedAt: fileInfo.ModTime().Format(time.RFC3339),
 		})
 	}

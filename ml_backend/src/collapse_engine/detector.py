@@ -223,6 +223,13 @@ class DimensionScore:
     metrics: Dict[str, float]
     severity: str  # 'critical', 'warning', 'ok'
 
+    def __post_init__(self):
+        # Dimension scores are documented as 0-100. Several analyzers return a raw
+        # weighted sum that can exceed that range (e.g. distribution_fidelity > 100),
+        # which would skew the averaged overall_score. Clamp here so every
+        # DimensionScore honors the contract regardless of which analyzer built it.
+        self.score = float(min(100.0, max(0.0, self.score)))
+
 
 @dataclass
 class CollapseConfig:

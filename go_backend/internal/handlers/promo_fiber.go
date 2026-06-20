@@ -110,7 +110,7 @@ func RedeemPromoCodeFiber(c *fiber.Ctx) error {
 		     lifetime_purchased = credit_balances.lifetime_purchased + $3,
 		     updated_at = CURRENT_TIMESTAMP
 		 RETURNING balance`,
-		"cb_"+userID[:8], userID, creditsGrant,
+		"cb_"+userID, userID, creditsGrant,
 	).Scan(&newBalance)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -147,14 +147,24 @@ func RedeemPromoCodeFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Increment promo usage count
-	_, err = tx.Exec(ctx,
-		`UPDATE promo_codes SET current_uses = current_uses + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+	// Atomically increment usage and enforce the max_uses cap inside the
+	// transaction. The earlier current_uses >= max_uses check is racy on its own;
+	// if two users redeem the final slot concurrently, only the UPDATE whose
+	// RowsAffected==1 succeeds and the other is rolled back as exhausted.
+	tag, err := tx.Exec(ctx,
+		`UPDATE promo_codes
+		 SET current_uses = current_uses + 1, updated_at = CURRENT_TIMESTAMP
+		 WHERE id = $1 AND (max_uses <= 0 OR current_uses < max_uses)`,
 		promoID,
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "SERVER_ERROR", "message": "Failed to update promo code"},
+		})
+	}
+	if tag.RowsAffected() == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "PROMO_EXHAUSTED", "message": "This promotional code has reached its maximum number of uses"},
 		})
 	}
 
@@ -165,12 +175,12 @@ func RedeemPromoCodeFiber(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"success":        true,
-		"code":           req.Code,
+		"success":         true,
+		"code":            req.Code,
 		"credits_granted": creditsGrant,
-		"new_balance":    newBalance,
-		"description":    description,
-		"message":        fmt.Sprintf("Successfully redeemed! %d credits added to your account.", creditsGrant),
+		"new_balance":     newBalance,
+		"description":     description,
+		"message":         fmt.Sprintf("Successfully redeemed! %d credits added to your account.", creditsGrant),
 	})
 }
 

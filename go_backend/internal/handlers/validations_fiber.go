@@ -25,6 +25,12 @@ import (
 // Package-level validation gRPC client
 var validationGRPCClient *grpcclient.ValidationClient
 
+// validationWorkerSem bounds the number of concurrent async validation-processing
+// goroutines. Without it, each request spawned an unbounded goroutine running
+// multi-minute gRPC calls, growing goroutine and DB-connection counts without
+// limit under load. Acquiring blocks (backpressure) rather than dropping work.
+var validationWorkerSem = make(chan struct{}, 16)
+
 // SetValidationClient sets the package-level validation gRPC client for use by standalone handler functions.
 func SetValidationClient(client *grpcclient.ValidationClient) {
 	validationGRPCClient = client
@@ -636,6 +642,11 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 	validationRepo := repository.NewValidationRepository(database.GetDB())
 	if err := validationRepo.Create(ctx, &validation); err != nil {
 		log.Printf("Failed to create validation: %v", err)
+		// Credits were already deducted above; refund them so the user is not
+		// charged for a validation job that was never created.
+		refundDesc := fmt.Sprintf("Refund for failed validation creation %s", validationID)
+		refundType := "validation_refund"
+		_, _ = creditRepo.AddCredits(ctx, userID, creditCost.CreditsRequired, "refund", refundDesc, &refundType, &validationID)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "DATABASE_ERROR",
@@ -656,8 +667,11 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		"validation_type": validationType,
 	})
 
-	// Dispatch async ML processing
+	// Dispatch async ML processing (bounded by validationWorkerSem)
 	go func() {
+		validationWorkerSem <- struct{}{}
+		defer func() { <-validationWorkerSem }()
+
 		db := database.GetDB()
 		if validationGRPCClient == nil {
 			log.Printf("No validation gRPC client - using simulated ML processing for %s", validationID)
@@ -1032,9 +1046,19 @@ func GetValidationReportFiber(c *fiber.Ctx) error {
 		if validation.WarrantyEligible != nil {
 			we = *validation.WarrantyEligible
 		}
+		// A validation can be marked completed while risk_score/risk_level are NULL
+		// (e.g. a partial async write); guard the dereferences to avoid a panic.
+		rs := 0
+		if validation.RiskScore != nil {
+			rs = *validation.RiskScore
+		}
+		rl := "unknown"
+		if validation.RiskLevel != nil {
+			rl = *validation.RiskLevel
+		}
 		reportResults = &models.ValidationResults{
-			RiskScore: *validation.RiskScore,
-			RiskLevel: *validation.RiskLevel,
+			RiskScore: rs,
+			RiskLevel: rl,
 			PredictedPerformance: models.PredictedPerformance{
 				Accuracy:           0.87,
 				ConfidenceInterval: []float64{0.84, 0.90},
@@ -1358,17 +1382,31 @@ func CancelValidationFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Cancel the validation
+	// Atomically transition to cancelled only if still cancellable. RowsAffected
+	// tells us whether THIS request performed the cancellation, which makes the
+	// refund below idempotent under concurrent or retried cancel calls.
 	now := time.Now()
-	validation.Status = "cancelled"
-	validation.CompletedAt = &now
 	errMsg := "Cancelled by user"
-	validation.ErrorMessage = &errMsg
-	if err := validationRepo.Update(ctx, validation); err != nil {
+	tag, err := database.GetDB().Exec(ctx,
+		`UPDATE validations
+		 SET status = 'cancelled', completed_at = $2, error_message = $3
+		 WHERE id = $1 AND status IN ('queued', 'processing')`,
+		validationID, now, errMsg)
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "DATABASE_ERROR",
 				"message": "Failed to cancel validation",
+			},
+		})
+	}
+	if tag.RowsAffected() == 0 {
+		// A concurrent request already cancelled/completed it; do not refund again.
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":           "INVALID_STATUS",
+				"message":        "Only queued or processing validations can be cancelled",
+				"current_status": validation.Status,
 			},
 		})
 	}

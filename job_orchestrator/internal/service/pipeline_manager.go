@@ -220,9 +220,19 @@ func (s *OrchestratorService) executePipelineStage(ctx context.Context, pipeline
 	pipeline.JobIDs = append(pipeline.JobIDs, job.ID)
 	s.mu.Unlock()
 
-	// Poll job status until completion
+	// Poll job status until completion, bounded by ctx and a generous backstop
+	// deadline so a job that never reaches a terminal state cannot leak this
+	// goroutine forever. The deadline covers retries (executor timeout x retries).
+	pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer pollCancel()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	for {
-		time.Sleep(5 * time.Second)
+		select {
+		case <-pollCtx.Done():
+			return fmt.Errorf("stage %s did not reach a terminal state in time: %w", stageName, pollCtx.Err())
+		case <-ticker.C:
+		}
 
 		currentJob, err := s.GetJob(ctx, job.ID)
 		if err != nil {

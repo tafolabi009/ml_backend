@@ -19,8 +19,36 @@ func logAdminAction(adminID, action, targetID, details string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	db := database.GetDB()
+	// Build the details payload with json.Marshal so values containing quotes or
+	// other JSON-special characters cannot corrupt or forge the audit record.
+	detailsJSON, err := json.Marshal(map[string]string{"target": targetID, "details": details})
+	if err != nil {
+		detailsJSON = []byte("{}")
+	}
 	db.Exec(ctx, `INSERT INTO security_events (user_id, event_type, success, details, created_at) VALUES ($1, $2, true, $3, NOW())`,
-		adminID, action, fmt.Sprintf(`{"target": "%s", "details": "%s"}`, targetID, details))
+		adminID, action, string(detailsJSON))
+}
+
+// isLastActiveAdmin reports whether userID is currently an active admin and no
+// other active admin exists. Used to prevent demoting/deactivating the last admin
+// and locking the system out of all admin access.
+func isLastActiveAdmin(ctx context.Context, userID string) bool {
+	db := database.GetDB()
+	var role string
+	var isActive bool
+	if err := db.QueryRow(ctx, `SELECT COALESCE(role, 'user'), is_active FROM users WHERE id = $1`, userID).Scan(&role, &isActive); err != nil {
+		return false
+	}
+	if role != "admin" || !isActive {
+		return false
+	}
+	var others int
+	if err := db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM users WHERE COALESCE(role, 'user') = 'admin' AND is_active = true AND id <> $1`,
+		userID).Scan(&others); err != nil {
+		return false
+	}
+	return others == 0
 }
 
 // GetSystemOverviewFiber returns system-wide statistics for admin dashboard
@@ -63,12 +91,12 @@ func GetSystemOverviewFiber(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"total_users":            totalUsers,
-		"total_validations":      totalValidations,
-		"total_datasets":         totalDatasets,
+		"total_users":             totalUsers,
+		"total_validations":       totalValidations,
+		"total_datasets":          totalDatasets,
 		"total_credits_purchased": totalCreditsPurchased,
-		"active_jobs":            activeJobs,
-		"users_by_role":          roleCounts,
+		"active_jobs":             activeJobs,
+		"users_by_role":           roleCounts,
 	})
 }
 
@@ -278,6 +306,13 @@ func UpdateUserRoleFiber(c *fiber.Ctx) error {
 
 	db := database.GetDB()
 
+	// Don't allow demoting the last active admin out of the admin role.
+	if req.Role != "admin" && isLastActiveAdmin(ctx, targetUserID) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "LAST_ADMIN", "message": "Cannot demote the last active admin"},
+		})
+	}
+
 	tag, err := db.Exec(ctx, `UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`, req.Role, targetUserID)
 	if err != nil {
 		log.Printf("Failed to update user role: %v", err)
@@ -299,6 +334,7 @@ func UpdateUserRoleFiber(c *fiber.Ctx) error {
 // UpdateUserStatusFiber activates or deactivates a user
 func UpdateUserStatusFiber(c *fiber.Ctx) error {
 	targetUserID := c.Params("id")
+	currentUserID := c.Locals("user_id").(string)
 
 	var req struct {
 		IsActive bool `json:"is_active"`
@@ -309,10 +345,24 @@ func UpdateUserStatusFiber(c *fiber.Ctx) error {
 		})
 	}
 
+	// Prevent an admin from deactivating their own account (self-lockout).
+	if targetUserID == currentUserID && !req.IsActive {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "SELF_DEACTIVATION", "message": "You cannot deactivate your own account"},
+		})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	db := database.GetDB()
+
+	// Don't allow deactivating the last active admin (total loss of admin access).
+	if !req.IsActive && isLastActiveAdmin(ctx, targetUserID) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "LAST_ADMIN", "message": "Cannot deactivate the last active admin"},
+		})
+	}
 
 	tag, err := db.Exec(ctx, `UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`, req.IsActive, targetUserID)
 	if err != nil {
@@ -341,9 +391,15 @@ func CreatePromoCodeFiber(c *fiber.Ctx) error {
 		MaxUses      int    `json:"max_uses"`
 		Description  string `json:"description"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.Code == "" {
+	if err := c.BodyParser(&req); err != nil || req.Code == "" || req.CreditsGrant <= 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INVALID_REQUEST", "message": "code and credits_grant are required"},
+			"error": fiber.Map{"code": "INVALID_REQUEST", "message": "code and a positive credits_grant are required"},
+		})
+	}
+	// max_uses <= 0 means unlimited; negative is invalid.
+	if req.MaxUses < 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INVALID_REQUEST", "message": "max_uses cannot be negative"},
 		})
 	}
 
@@ -1010,9 +1066,9 @@ func UpdatePlatformSettingsFiber(c *fiber.Ctx) error {
 	}
 
 	knownKeys := map[string]bool{
-		"registration_enabled": true,
-		"maintenance_mode":     true,
-		"max_upload_size_gb":   true,
+		"registration_enabled":   true,
+		"maintenance_mode":       true,
+		"max_upload_size_gb":     true,
 		"default_signup_credits": true,
 		"allowed_email_domains":  true,
 	}

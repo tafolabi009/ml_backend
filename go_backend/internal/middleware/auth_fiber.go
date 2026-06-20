@@ -53,12 +53,25 @@ func AuthRequiredFiber() fiber.Handler {
 			})
 		}
 
+		// A refresh token must never be accepted as a bearer/access token.
+		// (Tokens issued before token typing have an empty type and still pass.)
+		if claims.TokenType == auth.TokenTypeRefresh {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": fiber.Map{
+					"code":    "INVALID_TOKEN",
+					"message": "Refresh token cannot be used for authentication",
+				},
+			})
+		}
+
 		// Check if token is blacklisted
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		userRepo := repository.NewUserRepository(database.GetDB())
-		if userRepo.IsTokenBlacklisted(ctx, auth.HashToken(token)) {
+		blacklisted, blErr := userRepo.IsTokenBlacklisted(ctx, auth.HashToken(token))
+		if blErr != nil || blacklisted {
+			// Fail closed: if we cannot verify the token is not revoked, deny.
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": fiber.Map{
 					"code":    "TOKEN_REVOKED",

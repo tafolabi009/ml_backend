@@ -295,7 +295,9 @@ func LoginFiber(c *fiber.Ctx) error {
 					emailClient := email.GetClient()
 					if emailClient.IsConfigured() {
 						userName := ""
-						if user.FullName != nil { userName = *user.FullName }
+						if user.FullName != nil {
+							userName = *user.FullName
+						}
 						subject, body := email.VerificationOTPEmail(userName, otp)
 						if err := emailClient.Send(user.Email, subject, body); err != nil {
 							log.Printf("Failed to resend OTP to %s: %v", user.Email, err)
@@ -335,7 +337,7 @@ func LoginFiber(c *fiber.Ctx) error {
 			// Return indication that 2FA is required
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"requires_two_factor": true,
-				"message":            "Two-factor authentication code required",
+				"message":             "Two-factor authentication code required",
 			})
 		}
 
@@ -380,7 +382,7 @@ func LoginFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	refreshToken, err := auth.GenerateTokenWithClaims(
+	refreshToken, err := auth.GenerateRefreshToken(
 		user.ID, user.Email, strVal(user.Username), strVal(user.CompanyID), strVal(user.Role), sessionID, refreshTokenTTL,
 	)
 	if err != nil {
@@ -500,13 +502,25 @@ func RefreshTokenFiber(c *fiber.Ctx) error {
 		})
 	}
 
+	// Only refresh tokens may be exchanged here; reject access tokens.
+	// (Empty type = legacy token issued before typing, still accepted.)
+	if claims.TokenType == auth.TokenTypeAccess {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":    "INVALID_TOKEN",
+				"message": "An access token cannot be used to refresh",
+			},
+		})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	userRepo := repository.NewUserRepository(database.GetDB())
 
-	// Check if token is blacklisted
-	if userRepo.IsTokenBlacklisted(ctx, auth.HashToken(req.RefreshToken)) {
+	// Check if token is blacklisted. Fail closed on a lookup error.
+	blacklisted, blErr := userRepo.IsTokenBlacklisted(ctx, auth.HashToken(req.RefreshToken))
+	if blErr != nil || blacklisted {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "TOKEN_REVOKED",
@@ -556,7 +570,7 @@ func RefreshTokenFiber(c *fiber.Ctx) error {
 	}
 
 	// Token rotation: generate new refresh token and blacklist the old one
-	newRefreshToken, err := auth.GenerateTokenWithClaims(
+	newRefreshToken, err := auth.GenerateRefreshToken(
 		claims.UserID, claims.Email, strVal(user.Username), claims.CompanyID, strVal(user.Role), newSessionID, refreshTokenTTL,
 	)
 	if err != nil {
@@ -655,7 +669,7 @@ func UpdateProfileFiber(c *fiber.Ctx) error {
 	defer cancel()
 
 	userRepo := repository.NewUserRepository(database.GetDB())
-	
+
 	// Get existing user
 	user, err := userRepo.GetByID(ctx, userID.(string))
 	if err != nil {
@@ -1108,7 +1122,7 @@ func VerifyEmailFiber(c *fiber.Ctx) error {
 	if err != nil {
 		return c.JSON(fiber.Map{"message": "Email verified successfully", "email_verified": true})
 	}
-	refreshToken, err := auth.GenerateTokenWithClaims(
+	refreshToken, err := auth.GenerateRefreshToken(
 		userID, user.Email, strVal(user.Username), strVal(user.CompanyID), strVal(user.Role), sessionID, refreshTokenTTL,
 	)
 	if err != nil {
@@ -1124,17 +1138,20 @@ func VerifyEmailFiber(c *fiber.Ctx) error {
 	// Update last login
 	_, _ = db.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, userID)
 
-	// Send welcome email (best-effort)
+	// Send welcome email (best-effort) to the authoritative, normalized address.
 	go func() {
 		emailClient := email.GetClient()
 		if emailClient.IsConfigured() {
-			var fullName string
+			var fullName, userEmail string
 			database.GetDB().QueryRow(context.Background(),
-				`SELECT COALESCE(full_name, '') FROM users WHERE id = $1`, userID,
-			).Scan(&fullName)
+				`SELECT COALESCE(full_name, ''), email FROM users WHERE id = $1`, userID,
+			).Scan(&fullName, &userEmail)
+			if userEmail == "" {
+				userEmail = req.Email
+			}
 			subject, html := email.WelcomeEmail(fullName)
-			if err := emailClient.Send(req.Email, subject, html); err != nil {
-				log.Printf("Failed to send welcome email to %s: %v", req.Email, err)
+			if err := emailClient.Send(userEmail, subject, html); err != nil {
+				log.Printf("Failed to send welcome email to %s: %v", userEmail, err)
 			}
 		}
 	}()
@@ -1474,4 +1491,3 @@ func UpdateNotificationPreferencesFiber(c *fiber.Ctx) error {
 		"ticket_updates":      ticketUpdates,
 	})
 }
-

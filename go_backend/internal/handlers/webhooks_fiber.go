@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
+	"github.com/tafolabi009/backend/go_backend/pkg/webhook"
 )
 
 // validWebhookEvents defines the allowed event types for webhooks
@@ -62,9 +62,9 @@ func CreateWebhookFiber(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "URL is required"},
 		})
 	}
-	if !strings.HasPrefix(req.URL, "https://") {
+	if err := webhook.ValidateWebhookURL(req.URL); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Webhook URL must use HTTPS"},
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": err.Error()},
 		})
 	}
 
@@ -292,9 +292,9 @@ func UpdateWebhookFiber(c *fiber.Ctx) error {
 
 	// Validate URL if provided
 	if req.URL != nil {
-		if !strings.HasPrefix(*req.URL, "https://") {
+		if err := webhook.ValidateWebhookURL(*req.URL); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Webhook URL must use HTTPS"},
+				"error": fiber.Map{"code": "VALIDATION_ERROR", "message": err.Error()},
 			})
 		}
 	}
