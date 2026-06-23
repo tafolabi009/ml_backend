@@ -42,6 +42,10 @@ coverage.xml
 ml_backend/packages/*.whl
 ml_backend/data/**/*.h5
 
+# Build-time CA bundle (proxy-trust injection for Docker builds; never commit)
+ca-bundle.crt
+**/ca-bundle.crt
+
 # Environment variables
 .env
 .env.local
