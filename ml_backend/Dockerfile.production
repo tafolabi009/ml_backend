@@ -46,7 +46,12 @@ RUN pip install --no-cache-dir \
     uvloop>=0.19.0 \
     orjson>=3.9.0
 
-# Install resonance-neural-networks from GitHub repository
+# Install Temporal Eigenstate Networks (TEN) — the core model package (REQUIRED).
+# Provides the `ten` module (from ten import TEN); without it the engine degrades to mocks.
+RUN pip install --no-cache-dir "git+https://github.com/genovotechnologies/temporal-eigenstate-networks.git" \
+    && python -c "import ten; from ten import TEN; print('TEN import OK')"
+
+# Install legacy Resonance NN (NEURON_NEW) for backward-compat aliases (best-effort)
 RUN pip install --no-cache-dir git+https://github.com/tafolabi009/NEURON_NEW.git || true
 
 # Copy application code
