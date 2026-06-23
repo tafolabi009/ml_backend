@@ -5,7 +5,8 @@
 ## Live API endpoint
 
 ```
-http://synthos-alb-1146484742.us-east-1.elb.amazonaws.com
+https://api.synthos.dev      (HTTPS via ACM; HTTP -> HTTPS 301 redirect)
+http://synthos-alb-1146484742.us-east-1.elb.amazonaws.com   (direct ALB DNS)
 ```
 
 | Path | Result |
@@ -52,23 +53,23 @@ http://synthos-alb-1146484742.us-east-1.elb.amazonaws.com
 4. **`phase2` `ML_BACKEND_IMAGE`** is referenced in the EC2 user-data but never assigned — set it to `${ECR_REPO}/${PROJECT_NAME}/ml-backend:latest`.
 5. **Secrets Manager JSON** — the original `synthos/production/secrets` value was malformed (raw newline in a string) and had placeholder DB/Redis hostnames; it was rewritten with valid JSON and the real endpoints. The RDS master password was rotated as part of this.
 
-## Custom domain + HTTPS — api.synthos.dev (in progress)
+## Custom domain + HTTPS — api.synthos.dev (LIVE)
 
-`synthos.dev` is **not** in this account's public Route 53 (only a private service-discovery
-zone exists), so the DNS records below must be added wherever `synthos.dev` is managed.
+`api.synthos.dev` is served over HTTPS via the ALB. DNS for `synthos.dev` is managed at
+name.com (not Route 53), with two CNAMEs:
+1. `api.synthos.dev` -> `synthos-alb-1146484742.us-east-1.elb.amazonaws.com`
+2. ACM DNS-validation CNAME (`_a688293cc2a1e86ee9f8d98d79135548.api` host)
 
-1. **Endpoint** — `CNAME api.synthos.dev -> synthos-alb-1146484742.us-east-1.elb.amazonaws.com`
-2. **ACM validation** — `CNAME _a688293cc2a1e86ee9f8d98d79135548.api.synthos.dev -> _80805b7f71e9a86e2cd5ad67cabebb51.jkddzztszm.acm-validations.aws`
-
-ACM cert: `arn:aws:acm:us-east-1:173128528397:certificate/a09457c5-77f9-4803-9a8b-9603797d6d94`
-(currently `PENDING_VALIDATION`). Once record #2 is added and the cert is `ISSUED`, create an
-HTTPS:443 listener on `synthos-alb` with that cert and a HTTP:80 -> 443 redirect.
+- ACM cert `arn:aws:acm:us-east-1:173128528397:certificate/a09457c5-77f9-4803-9a8b-9603797d6d94` — **ISSUED**
+- ALB **HTTPS:443** listener (TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06`) -> go-backend target group
+- ALB **HTTP:80** -> **HTTPS:443** 301 redirect
+- Verified: `https://api.synthos.dev/health` = 200, `http://...` = 301
 
 ## Completed hardening (this session)
 - **CORS**: `ALLOWED_ORIGINS` = `https://synthos.dev,https://www.synthos.dev,https://app.synthos.dev,https://api.synthos.dev` (task def `synthos-go-backend:3`).
 - **Redis AUTH**: generated a new token, updated the secret's `redis_password`/`redis_url` (DB/JWT preserved), and rotated the `synthos-redis` replication group to the same token (`ROTATE`). Redis is now active. Optional: a follow-up `SET` rotation invalidates the old token.
 
 ## Remaining follow-ups
-- **HTTPS 443 listener** — pending the ACM cert validation above.
+- **GPU ML node (Phase 2)** — deploy once the g5.xlarge quota case is approved.
 - **Service discovery**: the `synthos` private DNS namespace was still provisioning at deploy time; re-attach the `job-orchestrator` service registry once present.
 - Tear down the temporary `synthos-deployer` IAM admin user when finished.
