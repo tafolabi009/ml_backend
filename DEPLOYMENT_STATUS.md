@@ -37,10 +37,12 @@ http://synthos-alb-1146484742.us-east-1.elb.amazonaws.com   (direct ALB DNS)
 
 ## What is NOT yet deployed
 
-### Phase 2 — GPU ML backend (blocked on AWS quota)
-- This account has **0 GPU vCPU quota** (On-Demand P, G/VT, and G/VT Spot all = 0), and `p3.2xlarge` is **not offered in us-east-1**.
-- A quota-increase request for **g5.xlarge** (8 vCPU, "Running On-Demand G and VT instances", `L-DB2E81BA`) was filed — status **CASE_OPENED** (request id `dd93059a6809451a93ef866d3a6b1bf6N3ROhnzy`).
-- **`synthos/ml-backend:latest` is already built and pushed to ECR** (~4.5 GB compressed) — so the remaining work once quota is granted is just: launch a `g5.xlarge` (Deep Learning AMI) with the GPU IAM instance profile + user-data that pulls the image and runs it with `--gpus all`, then update `VALIDATION_SERVICE_ADDR` / `COLLAPSE_SERVICE_ADDR` / `DATA_SERVICE_ADDR` on both Fargate services from the `127.0.0.1` placeholder to the GPU node's private IP and roll them.
+### ML backend — running on Fargate CPU (GPU quota DENIED; appeal pending)
+- The g5.xlarge G/VT quota increase was **DENIED** by AWS (account has 0 GPU quota). An **appeal** with a detailed use case is to be submitted (reopen the case).
+- **Stopgap (live):** `synthos-ml-backend` runs on **Fargate CPU** (4 vCPU / 16 GB, `GPU_TIER=cpu`, `CUDA_VISIBLE_DEVICES=-1`), registered in Cloud Map as `ml-backend.synthos`. Serves ValidationEngine (`:50051`), CollapseEngine (`:50052`). Slower than GPU but functional.
+- **Real TEN engine installed:** the ML Dockerfile now installs `ten` from `github.com/genovotechnologies/temporal-eigenstate-networks` (user-confirmed) with a build-time `import ten` assertion — runtime logs `Successfully imported ... (ten) package` (no more mock fallback). The legacy `NEURON_NEW` install was the bug.
+- `go-backend` (`:6`) and `job-orchestrator` (`:2`) point `VALIDATION_/COLLAPSE_/DATA_SERVICE_ADDR` at `ml-backend.synthos`.
+- **When GPU is granted (post-appeal):** launch a `g5.xlarge` (or run the ML container on a GPU EC2 node) and repoint the ML service addrs to it for full-speed inference.
 
 ## Corrections applied at deploy time (fold these into `scripts/aws/*`)
 
