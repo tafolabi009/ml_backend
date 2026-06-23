@@ -68,7 +68,8 @@ name.com (not Route 53), with two CNAMEs:
 ## Completed hardening (this session)
 - **CORS**: `ALLOWED_ORIGINS` = `https://synthos.dev,https://www.synthos.dev,https://app.synthos.dev,https://api.synthos.dev`.
 - **Redis AUTH**: generated a new token, updated the secret's `redis_password`/`redis_url` (DB/JWT preserved), and rotated the `synthos-redis` replication group to the same token (`ROTATE`). Redis is now active. Optional: a follow-up `SET` rotation invalidates the old token.
-- **Email (Resend)**: `RESEND_API_KEY` added to the secret (`resend_api_key`) and injected into go-backend; `EMAIL_FROM_ADDRESS=noreply@synthos.dev`, `EMAIL_FROM_NAME=Synthos`. Startup now logs `Email client configured (Resend)`; OTP / verification emails send. (Current task def: `synthos-go-backend:4`.)
+- **Email (Resend)**: `RESEND_API_KEY` added to the secret (`resend_api_key`) and injected into go-backend; `EMAIL_FROM_ADDRESS=noreply@synthos.dev`, `EMAIL_FROM_NAME=Synthos`. Startup now logs `Email client configured (Resend)`; OTP / verification emails send.
+- **Service status board / Orchestrator**: `GET /api/v1/developer/services` now does **real TCP health probes** (was a stub returning `"available"`, which the frontend rendered as Down). Wired the gateway to the orchestrator via **Cloud Map** service discovery: created SD service `job-orchestrator` in namespace `synthos` (`ns-xtarnjzuapccvndo`), recreated the `synthos-job-orchestrator` ECS service with the registry, and set `ORCHESTRATOR_ADDR=job-orchestrator.synthos:8080` on go-backend. Orchestrator now reports Healthy; Validation/Collapse correctly report Down until the GPU node is up. (Current task def: `synthos-go-backend:5`.)
 
 ## Remaining follow-ups
 - **GPU ML node (Phase 2)** — deploy once the g5.xlarge quota case is approved.

@@ -3,7 +3,10 @@ package handlers
 import (
 	"context"
 	"log"
+	"net"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -45,38 +48,59 @@ func GetDevOverviewFiber(c *fiber.Ctx) error {
 	})
 }
 
-// GetServicesStatusFiber checks health of each backend service
+// probeTCP reports "healthy" if a TCP connection to addr succeeds within the
+// timeout, otherwise "unhealthy". Accepts "host:port" or "http(s)://host:port/path".
+func probeTCP(addr string) string {
+	if addr == "" {
+		return "unhealthy"
+	}
+	addr = strings.TrimPrefix(strings.TrimPrefix(addr, "https://"), "http://")
+	if i := strings.IndexByte(addr, '/'); i >= 0 {
+		addr = addr[:i]
+	}
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		return "unhealthy"
+	}
+	_ = conn.Close()
+	return "healthy"
+}
+
+func getEnvOrDefaultDev(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// GetServicesStatusFiber checks the real health of each backend service.
 func GetServicesStatusFiber(c *fiber.Ctx) error {
 	services := make(map[string]fiber.Map)
 
-	// Database
-	dbHealthy := database.IsHealthy()
-	dbStatus := "healthy"
-	if !dbHealthy {
-		dbStatus = "unhealthy"
+	// Database (real connectivity check)
+	dbStatus := "unhealthy"
+	if database.IsHealthy() {
+		dbStatus = "healthy"
 	}
 	services["database"] = fiber.Map{"status": dbStatus}
 
-	// Validation service - check via DB if recent validations are processing
+	// Pending validations (best-effort, from DB)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	db := database.GetDB()
-
 	var pendingValidations int64
 	_ = db.QueryRow(ctx, `SELECT COUNT(*) FROM validations WHERE status IN ('pending', 'running')`).Scan(&pendingValidations)
+
+	// Backend services (real TCP reachability probes)
+	services["orchestrator"] = fiber.Map{
+		"status": probeTCP(getEnvOrDefaultDev("ORCHESTRATOR_ADDR", "localhost:8080")),
+	}
 	services["validation"] = fiber.Map{
-		"status":              "available",
+		"status":              probeTCP(getEnvOrDefaultDev("VALIDATION_SERVICE_ADDR", "localhost:50051")),
 		"pending_validations": pendingValidations,
 	}
-
-	// Collapse service
 	services["collapse"] = fiber.Map{
-		"status": "available",
-	}
-
-	// Orchestrator
-	services["orchestrator"] = fiber.Map{
-		"status": "available",
+		"status": probeTCP(getEnvOrDefaultDev("COLLAPSE_SERVICE_ADDR", "localhost:50052")),
 	}
 
 	return c.JSON(fiber.Map{
