@@ -268,7 +268,7 @@ func runMigrations(pool *pgxpool.Pool) error {
 		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS recommendation TEXT`,
 		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS warranty_eligible BOOLEAN`,
 		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS validation_type VARCHAR(50) DEFAULT 'comprehensive'`,
-		
+
 		// Fix warranties table to match repository code
 		`ALTER TABLE warranties ADD COLUMN IF NOT EXISTS warranty_type VARCHAR(50)`,
 		`ALTER TABLE warranties ADD COLUMN IF NOT EXISTS coverage_amount DECIMAL(12,2)`,
@@ -278,7 +278,7 @@ func runMigrations(pool *pgxpool.Pool) error {
 		`ALTER TABLE warranties ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`,
 		`ALTER TABLE warranties ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP`,
 		`ALTER TABLE warranties ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
-		
+
 		// Fix warranty_claims table to match repository code
 		`ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS claim_type VARCHAR(50)`,
 		`ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS description TEXT`,
@@ -463,6 +463,158 @@ func runMigrations(pool *pgxpool.Pool) error {
 
 		// Add location column to security_events
 		`ALTER TABLE security_events ADD COLUMN IF NOT EXISTS location VARCHAR(100) DEFAULT ''`,
+
+		// Credit schema drift fixes — columns the credit repository selects but
+		// the original CREATE TABLE statements above omit (existing tables aren't
+		// altered by CREATE TABLE IF NOT EXISTS, so add them explicitly).
+		`ALTER TABLE credit_packages ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`,
+
+		// Idempotency keys: safe client retries on charging endpoints. A stored
+		// row replays the original successful response instead of re-charging.
+		`CREATE TABLE IF NOT EXISTS idempotency_keys (
+			user_id VARCHAR(255) NOT NULL,
+			endpoint VARCHAR(100) NOT NULL,
+			idem_key VARCHAR(255) NOT NULL,
+			request_hash VARCHAR(64) NOT NULL,
+			response_status INTEGER NOT NULL,
+			response_body JSONB,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (user_id, endpoint, idem_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at)`,
+
+		// Calibration loop: user-reported downstream outcomes vs our predicted risk.
+		`CREATE TABLE IF NOT EXISTS validation_outcomes (
+			id VARCHAR(36) PRIMARY KEY,
+			validation_id VARCHAR(255) NOT NULL UNIQUE REFERENCES validations(id) ON DELETE CASCADE,
+			user_id VARCHAR(255) NOT NULL,
+			predicted_risk INTEGER,
+			outcome VARCHAR(20) NOT NULL,
+			actual_metric DOUBLE PRECISION,
+			notes TEXT,
+			observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_validation_outcomes_user ON validation_outcomes(user_id)`,
+
+		// Continuous drift monitoring: scheduled re-validation of a dataset.
+		`CREATE TABLE IF NOT EXISTS dataset_monitors (
+			id VARCHAR(255) PRIMARY KEY,
+			user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			dataset_id VARCHAR(255) NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+			name VARCHAR(255) NOT NULL,
+			interval_hours INTEGER NOT NULL DEFAULT 24,
+			max_risk_score INTEGER NOT NULL DEFAULT 50,
+			validation_type VARCHAR(50) NOT NULL DEFAULT 'comprehensive',
+			is_active BOOLEAN NOT NULL DEFAULT true,
+			paused_reason TEXT,
+			last_run_at TIMESTAMPTZ,
+			next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_validation_id VARCHAR(255),
+			last_risk_score INTEGER,
+			consecutive_alerts INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dataset_monitors_user ON dataset_monitors(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_dataset_monitors_due ON dataset_monitors(is_active, next_run_at)`,
+
+		`CREATE TABLE IF NOT EXISTS monitor_runs (
+			id VARCHAR(36) PRIMARY KEY,
+			monitor_id VARCHAR(255) NOT NULL REFERENCES dataset_monitors(id) ON DELETE CASCADE,
+			validation_id VARCHAR(255) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			risk_score INTEGER,
+			alerted BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			evaluated_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_monitor_runs_monitor ON monitor_runs(monitor_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_monitor_runs_pending ON monitor_runs(status)`,
+
+		// Shareable read-only report links.
+		`CREATE TABLE IF NOT EXISTS report_shares (
+			token VARCHAR(64) PRIMARY KEY,
+			user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			validation_id VARCHAR(255) NOT NULL REFERENCES validations(id) ON DELETE CASCADE,
+			expires_at TIMESTAMPTZ NOT NULL,
+			revoked BOOLEAN NOT NULL DEFAULT false,
+			view_count INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_report_shares_validation ON report_shares(validation_id)`,
+
+		// Certificate signing keypair (Ed25519), shared across gateway instances.
+		`CREATE TABLE IF NOT EXISTS signing_keys (
+			id VARCHAR(50) PRIMARY KEY,
+			algorithm VARCHAR(20) NOT NULL DEFAULT 'Ed25519',
+			public_key TEXT NOT NULL,
+			private_key TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Per-user quota overrides; defaults come from env when no row exists.
+		`CREATE TABLE IF NOT EXISTS user_quotas (
+			user_id VARCHAR(255) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			max_dataset_bytes BIGINT,
+			max_validations_per_day INTEGER,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Validations schema drift fixes — columns the handlers write but the
+		// original CREATE TABLE omits (same pattern as the credit fixes above).
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS validation_type VARCHAR(50)`,
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS risk_score INTEGER`,
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20)`,
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS recommendation TEXT`,
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS warranty_eligible BOOLEAN`,
+
+		// Per-stage pipeline timestamps for the live progress endpoint.
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS stage_history JSONB DEFAULT '[]'::jsonb`,
+
+		// User-editable validation display name (rename feature).
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS name VARCHAR(120)`,
+
+		// Rolling service health samples powering GET /health/uptime.
+		`CREATE TABLE IF NOT EXISTS service_health_checks (
+			id BIGSERIAL PRIMARY KEY,
+			service VARCHAR(50) NOT NULL,
+			healthy BOOLEAN NOT NULL,
+			latency_ms INTEGER,
+			checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_health_checks_service_time ON service_health_checks(service, checked_at DESC)`,
+
+		// Dataset groups: validate a folder of files as one logical dataset.
+		`CREATE TABLE IF NOT EXISTS dataset_groups (
+			id VARCHAR(255) PRIMARY KEY,
+			owner_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name VARCHAR(255) NOT NULL,
+			archived BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (owner_id, name)
+		)`,
+		`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS group_id VARCHAR(255)`,
+		`CREATE INDEX IF NOT EXISTS idx_datasets_group ON datasets(group_id)`,
+		`ALTER TABLE validations ADD COLUMN IF NOT EXISTS group_id VARCHAR(255)`,
+
+		// Paddle catalog mapping for hosted checkout/receipts.
+		`ALTER TABLE credit_packages ADD COLUMN IF NOT EXISTS paddle_price_id VARCHAR(255)`,
+
+		// Auto-validate schedules; daily/weekly cadences are backed by a
+		// dataset_monitor, on_upload hooks the upload-complete path.
+		`CREATE TABLE IF NOT EXISTS dataset_schedules (
+			dataset_id VARCHAR(255) PRIMARY KEY REFERENCES datasets(id) ON DELETE CASCADE,
+			user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			cadence VARCHAR(20) NOT NULL,
+			validation_type VARCHAR(50) NOT NULL DEFAULT 'comprehensive',
+			monitor_id VARCHAR(255),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for i, migration := range migrations {
@@ -480,6 +632,16 @@ func runMigrations(pool *pgxpool.Pool) error {
 		('default_signup_credits', '0'),
 		('allowed_email_domains', '""')
 	ON CONFLICT (key) DO NOTHING`)
+
+	// At most one refund per reference (validation/warranty/...). Best-effort:
+	// if legacy data already contains duplicate refunds this index cannot be
+	// created, and the code-level EXISTS guard remains the only protection.
+	_, _ = pool.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uq_refund_per_reference
+		ON credit_transactions(reference_id) WHERE type = 'refund' AND reference_id IS NOT NULL`)
+
+	// At most one credit grant per Paddle transaction (webhook idempotency).
+	_, _ = pool.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uq_paddle_txn
+		ON credit_transactions(reference_id) WHERE reference_type = 'paddle' AND reference_id IS NOT NULL`)
 
 	// Password reset tokens table
 	_, _ = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -501,6 +663,15 @@ func runMigrations(pool *pgxpool.Pool) error {
 		('pkg_business', 'Business', 'High-volume enterprise validation workloads', 2500, 500, 2000000, 'USD'),
 		('pkg_enterprise', 'Enterprise', 'Unlimited-scale validation with dedicated support and SLA', 15000, 5000, 8000000, 'USD')
 	ON CONFLICT (id) DO NOTHING`)
+
+	// Give seeded packages a sensible display order (sort_order defaults to 0)
+	_, _ = pool.Exec(ctx, `UPDATE credit_packages SET sort_order = CASE id
+		WHEN 'pkg_starter' THEN 1
+		WHEN 'pkg_professional' THEN 2
+		WHEN 'pkg_business' THEN 3
+		WHEN 'pkg_enterprise' THEN 4
+		ELSE sort_order END
+	WHERE sort_order = 0`)
 
 	// Seed credit costs
 	_, _ = pool.Exec(ctx, `INSERT INTO credit_costs (id, operation, credits_required, description) VALUES

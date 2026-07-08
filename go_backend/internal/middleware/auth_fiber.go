@@ -110,6 +110,21 @@ func AuthRequiredFiber() fiber.Handler {
 		c.Locals("session_id", claims.SessionID)
 		c.Locals("auth_type", "jwt")
 
+		// Impersonation: expose both identities, audit the request, and keep
+		// the session read-mostly (block mutating verbs).
+		if claims.ImpersonatorID != "" {
+			c.Locals("impersonator_id", claims.ImpersonatorID)
+			auditImpersonatedRequest(claims.ImpersonatorID, claims.UserID, c.Method(), c.Path(), c.IP())
+			if ImpersonationWriteBlocked(c.Method(), c.Path()) {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error": fiber.Map{
+						"code":    "IMPERSONATION_READ_ONLY",
+						"message": "Impersonation sessions cannot perform write or billing actions",
+					},
+				})
+			}
+		}
+
 		return c.Next()
 	}
 }

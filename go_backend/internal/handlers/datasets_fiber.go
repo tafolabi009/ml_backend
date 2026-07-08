@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,7 +17,6 @@ import (
 	"github.com/tafolabi009/backend/go_backend/pkg/database"
 	"github.com/tafolabi009/backend/go_backend/pkg/grpcclient"
 	"github.com/tafolabi009/backend/go_backend/pkg/storage"
-	validationpb "github.com/tafolabi009/backend/proto/validation"
 )
 
 // DatasetHandler holds dependencies for dataset handlers
@@ -76,14 +76,40 @@ func (h *DatasetHandler) InitiateUploadFiber(c *fiber.Ctx) error {
 		})
 	}
 
+	// Multimodal upload whitelist: only data formats the pipeline understands.
+	allowedExtensions := map[string]bool{
+		".csv": true, ".tsv": true, ".json": true, ".jsonl": true, ".ndjson": true,
+		".parquet": true, ".h5": true, ".hdf5": true, ".arrow": true, ".feather": true,
+		".xlsx": true, ".xls": true, ".txt": true,
+	}
+	if ext := strings.ToLower(filepath.Ext(req.Filename)); !allowedExtensions[ext] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":    "UNSUPPORTED_FILE_TYPE",
+				"message": "Unsupported file type. Allowed: csv, tsv, json, jsonl, ndjson, parquet, h5, hdf5, arrow, feather, xlsx, xls, txt",
+			},
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Dataset size quota (env default, per-user override via user_quotas).
+	if q := getUserQuota(ctx, userID); req.FileSize > q.MaxDatasetBytes {
+		return c.Status(fiber.StatusRequestEntityTooLarge).JSON(fiber.Map{
+			"error": fiber.Map{
+				"code":      "QUOTA_EXCEEDED",
+				"message":   fmt.Sprintf("Dataset exceeds your size limit (%d bytes). Contact support to raise it.", q.MaxDatasetBytes),
+				"max_bytes": q.MaxDatasetBytes,
+			},
+		})
+	}
+
 	// Generate dataset ID
 	datasetID := "ds_" + uuid.New().String()[:8]
 
 	// Generate storage key path
 	objectKey := fmt.Sprintf("%s/%s/%s", userID, datasetID, req.Filename)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
 	// Generate upload URL (resumable for GCS, presigned for S3)
 	var uploadURL string
@@ -142,15 +168,30 @@ func (h *DatasetHandler) InitiateUploadFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	response := models.InitiateUploadResponse{
-		DatasetID:    datasetID,
-		UploadURL:    uploadURL,
-		UploadMethod: uploadMethod,
-		ChunkSize:    8388608, // 8MB chunks for resumable uploads
-		ExpiresIn:    86400,   // 24 hours
+	// Optional dataset group: create-or-reuse by name for this owner.
+	var groupID, groupName string
+	if gn := strings.TrimSpace(req.GroupName); gn != "" {
+		if gid, gerr := getOrCreateDatasetGroup(ctx, userID, gn); gerr == nil {
+			groupID, groupName = gid, gn
+			_, _ = database.GetDB().Exec(ctx,
+				`UPDATE datasets SET group_id = $2 WHERE id = $1`, datasetID, gid)
+		} else {
+			log.Printf("group create-or-reuse failed for %q: %v", gn, gerr)
+		}
 	}
 
-	return c.JSON(response)
+	resp := fiber.Map{
+		"dataset_id":    datasetID,
+		"upload_url":    uploadURL,
+		"upload_method": uploadMethod,
+		"chunk_size":    8388608, // 8MB chunks for resumable uploads
+		"expires_in":    86400,   // 24 hours
+	}
+	if groupID != "" {
+		resp["group_id"] = groupID
+		resp["group_name"] = groupName
+	}
+	return c.JSON(resp)
 }
 
 // CompleteUploadFiber marks an upload as complete and triggers processing - Fiber version
@@ -205,7 +246,15 @@ func (h *DatasetHandler) CompleteUploadFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Trigger ML backend via gRPC and update status when done
+	// Auto-validate on upload when an on_upload schedule exists (best-effort).
+	go triggerOnUploadValidation(context.Background(), dataset.ID, userID)
+
+	// Capture the id and path from the DB-sourced struct (heap Go strings) before
+	// spawning a goroutine that outlives this handler. c.Params("id") aliases the
+	// pooled fasthttp request buffer, which is recycled once the handler returns —
+	// using it in the goroutine would race with the next request and corrupt the id.
+	dsID := dataset.ID
+	dsPath := dataset.S3Path
 	go func() {
 		db := database.GetDB()
 		updateCtx := context.Background()
@@ -214,33 +263,24 @@ func (h *DatasetHandler) CompleteUploadFiber(c *fiber.Ctx) error {
 			grpcCtx, grpcCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer grpcCancel()
 
-			cascadeConfig := &validationpb.CascadeConfig{
-				NumEpochs:               10,
-				BatchSize:               32,
-				LearningRate:            0.001,
-				EarlyStoppingPatience:   3,
-				ValidationSplit:         0.2,
-				Tiers:                   []string{"light", "medium", "heavy"},
-				EnableSpectralAnalysis:  true,
-				EnableFrequencyAnalysis: true,
-			}
-
-			_, err := h.ValidationClient.TrainCascade(grpcCtx, datasetID, dataset.S3Path, cascadeConfig)
+			// Best-effort diversity pre-analysis on upload (real cascade
+			// training runs during validation, not on upload).
+			_, err := h.ValidationClient.AnalyzeDiversity(grpcCtx, dsID, dsPath)
 			if err != nil {
-				log.Printf("⚠️ ML processing failed for dataset %s: %v - marking as ready anyway", datasetID, err)
+				log.Printf("⚠️ ML processing failed for dataset %s: %v - marking as ready anyway", dsID, err)
 			} else {
-				log.Printf("✅ ML processing completed for dataset %s", datasetID)
+				log.Printf("✅ ML processing completed for dataset %s", dsID)
 			}
 		} else {
-			log.Printf("⚠️ No ML client - marking dataset %s as ready directly", datasetID)
+			log.Printf("⚠️ No ML client - marking dataset %s as ready directly", dsID)
 		}
 
 		// Always mark dataset as ready so validations can proceed
-		_, err := db.Exec(updateCtx, `UPDATE datasets SET status = 'ready', updated_at = NOW() WHERE id = $1`, datasetID)
+		_, err := db.Exec(updateCtx, `UPDATE datasets SET status = 'ready', updated_at = NOW() WHERE id = $1`, dsID)
 		if err != nil {
-			log.Printf("❌ Failed to update dataset %s status to ready: %v", datasetID, err)
+			log.Printf("❌ Failed to update dataset %s status to ready: %v", dsID, err)
 		} else {
-			log.Printf("✅ Dataset %s marked as ready", datasetID)
+			log.Printf("✅ Dataset %s marked as ready", dsID)
 		}
 	}()
 
@@ -276,7 +316,7 @@ func (h *DatasetHandler) ListDatasetsFiber(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	datasets, totalCount, err := h.Repo.List(ctx, userID, page, pageSize)
+	datasets, totalCount, err := h.Repo.List(ctx, userID, page, pageSize, c.Query("search"))
 	if err != nil {
 		log.Printf("Failed to list datasets: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

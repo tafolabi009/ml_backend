@@ -25,22 +25,24 @@ type CreditTransaction struct {
 	ReferenceID   *string                `json:"reference_id,omitempty" db:"reference_id"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty" db:"metadata"`
 	CreatedAt     time.Time              `json:"created_at" db:"created_at"`
+	ReceiptURL    *string                `json:"receipt_url,omitempty" db:"-"`
 }
 
 // CreditPackage represents a purchasable credit package
 type CreditPackage struct {
-	ID           string                 `json:"id" db:"id"`
-	Name         string                 `json:"name" db:"name"`
-	Description  string                 `json:"description,omitempty" db:"description"`
-	Credits      int64                  `json:"credits" db:"credits"`
-	PriceCents   int64                  `json:"price_cents" db:"price_cents"`
-	Currency     string                 `json:"currency" db:"currency"`
-	BonusCredits int64                  `json:"bonus_credits" db:"bonus_credits"`
-	IsActive     bool                   `json:"is_active" db:"is_active"`
-	SortOrder    int                    `json:"sort_order" db:"sort_order"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty" db:"metadata"`
-	CreatedAt    time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at" db:"updated_at"`
+	ID            string                 `json:"id" db:"id"`
+	Name          string                 `json:"name" db:"name"`
+	Description   string                 `json:"description,omitempty" db:"description"`
+	Credits       int64                  `json:"credits" db:"credits"`
+	PriceCents    int64                  `json:"price_cents" db:"price_cents"`
+	Currency      string                 `json:"currency" db:"currency"`
+	BonusCredits  int64                  `json:"bonus_credits" db:"bonus_credits"`
+	PaddlePriceID *string                `json:"paddle_price_id,omitempty" db:"paddle_price_id"`
+	IsActive      bool                   `json:"is_active" db:"is_active"`
+	SortOrder     int                    `json:"sort_order" db:"sort_order"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty" db:"metadata"`
+	CreatedAt     time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at" db:"updated_at"`
 }
 
 // CreditCost defines how many credits an operation costs
@@ -75,10 +77,10 @@ type PurchaseCreditsResponse struct {
 
 // CreditBalanceResponse is the API response for credit balance
 type CreditBalanceResponse struct {
-	Balance           int64          `json:"balance"`
-	LifetimePurchased int64          `json:"lifetime_purchased"`
-	LifetimeUsed      int64          `json:"lifetime_used"`
-	CreditCosts       []CreditCost   `json:"credit_costs"`
+	Balance           int64        `json:"balance"`
+	LifetimePurchased int64        `json:"lifetime_purchased"`
+	LifetimeUsed      int64        `json:"lifetime_used"`
+	CreditCosts       []CreditCost `json:"credit_costs"`
 }
 
 // CreditHistoryResponse is the API response for credit transaction history

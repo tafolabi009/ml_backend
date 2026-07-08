@@ -77,7 +77,7 @@ func (r *WarrantyRepository) Create(ctx context.Context, warranty *Warranty) err
 func (r *WarrantyRepository) GetByID(ctx context.Context, warrantyID string) (*Warranty, error) {
 	query := `
 		SELECT id, validation_id, user_id, status, warranty_type, coverage_amount,
-		       start_date, end_date, terms, created_at, approved_at, rejected_at, rejection_reason
+		       start_date, end_date, terms, created_at, approved_at, rejected_at, COALESCE(rejection_reason, '')
 		FROM warranties
 		WHERE id = $1
 	`

@@ -168,6 +168,48 @@ func (c *S3Client) Download(ctx context.Context, key string, writer io.WriterAt)
 	return numBytes, nil
 }
 
+// GetObjectBytes downloads a small object fully into memory (e.g. sidecar
+// JSON reports). Not suitable for large dataset files.
+func (c *S3Client) GetObjectBytes(ctx context.Context, key string) ([]byte, error) {
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.config.Bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object %s: %w", key, err)
+	}
+	defer out.Body.Close()
+	return io.ReadAll(out.Body)
+}
+
+// GetObjectRange downloads at most maxBytes from the start of an object
+// (dataset previews). The bool result reports whether the WHOLE object was
+// returned (false = truncated at maxBytes).
+func (c *S3Client) GetObjectRange(ctx context.Context, key string, maxBytes int64) ([]byte, bool, error) {
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.config.Bucket),
+		Key:    aws.String(key),
+		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get object range %s: %w", key, err)
+	}
+	defer out.Body.Close()
+	b, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	complete := int64(len(b)) < maxBytes
+	// A 206 with ContentRange "bytes 0-N/TOTAL" tells us definitively.
+	if out.ContentRange != nil {
+		var from, to, total int64
+		if _, serr := fmt.Sscanf(*out.ContentRange, "bytes %d-%d/%d", &from, &to, &total); serr == nil {
+			complete = to+1 >= total
+		}
+	}
+	return b, complete, nil
+}
+
 // GeneratePresignedURL generates a presigned URL for upload or download
 // For PUT operations, contentType should be provided to prevent 403 signature mismatch errors
 func (c *S3Client) GeneratePresignedURL(ctx context.Context, key string, operation string, expiration time.Duration, contentType ...string) (string, error) {

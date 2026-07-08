@@ -138,8 +138,8 @@ func (r *UserRepository) InvalidateAllUserSessions(ctx context.Context, userID s
 // BlacklistToken adds a token to the blacklist
 func (r *UserRepository) BlacklistToken(ctx context.Context, tokenHash, userID string, expiresAt time.Time) error {
 	query := `
-		INSERT INTO token_blacklist (token_hash, user_id, expires_at, reason)
-		VALUES ($1, $2, $3, 'logout')
+		INSERT INTO token_blacklist (token_hash, user_id, expires_at)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (token_hash) DO NOTHING
 	`
 	_, err := r.db.Exec(ctx, query, tokenHash, userID, expiresAt)
@@ -234,7 +234,7 @@ func (r *UserRepository) GetPending2FASecret(ctx context.Context, userID string)
 	`
 	var secret string
 	var backupCodes []string
-	err := r.db.QueryRow(ctx, query, userID).Scan(&secret, pq.Array(&backupCodes))
+	err := r.db.QueryRow(ctx, query, userID).Scan(&secret, &backupCodes)
 	if err != nil {
 		return "", nil, err
 	}
@@ -300,7 +300,7 @@ func (r *UserRepository) GetAPIKey(ctx context.Context, keyID string) (*models.A
 		&key.Name,
 		&key.KeyPrefix,
 		&key.KeyHash,
-		pq.Array(&key.Scopes),
+		&key.Scopes,
 		&key.RateLimit,
 		&key.IsActive,
 		&key.LastUsedAt,
@@ -329,7 +329,7 @@ func (r *UserRepository) GetAPIKeyByHash(ctx context.Context, keyHash string) (*
 		&key.Name,
 		&key.KeyPrefix,
 		&key.KeyHash,
-		pq.Array(&key.Scopes),
+		&key.Scopes,
 		&key.RateLimit,
 		&key.IsActive,
 		&key.LastUsedAt,
@@ -366,7 +366,7 @@ func (r *UserRepository) ListAPIKeys(ctx context.Context, userID string) ([]mode
 			&key.UserID,
 			&key.Name,
 			&key.KeyPrefix,
-			pq.Array(&key.Scopes),
+			&key.Scopes,
 			&key.RateLimit,
 			&key.IsActive,
 			&key.LastUsedAt,

@@ -1,18 +1,34 @@
 package monitoring
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/utils"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// registry is a dedicated Prometheus registry for this service. Using a private
+// registry instead of the global default — and serving it via promhttp.HandlerFor
+// rather than promhttp.Handler — avoids InstrumentMetricHandler mutating the very
+// registry it gathers on every scrape (a self-modification-during-gather that
+// intermittently makes Gather report a duplicate series and return 500).
+var registry = prometheus.NewRegistry()
+var factory = promauto.With(registry)
+
+func init() {
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+}
+
 var (
 	// HTTP Metrics
-	httpRequestsTotal = promauto.NewCounterVec(
+	httpRequestsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
 			Help: "Total number of HTTP requests",
@@ -20,7 +36,7 @@ var (
 		[]string{"method", "path", "status"},
 	)
 
-	httpRequestDuration = promauto.NewHistogramVec(
+	httpRequestDuration = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
 			Help:    "HTTP request duration in seconds",
@@ -29,7 +45,7 @@ var (
 		[]string{"method", "path"},
 	)
 
-	httpRequestsInFlight = promauto.NewGauge(
+	httpRequestsInFlight = factory.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "http_requests_in_flight",
 			Help: "Current number of HTTP requests being processed",
@@ -37,7 +53,7 @@ var (
 	)
 
 	// Validation Metrics
-	validationsTotal = promauto.NewCounterVec(
+	validationsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "validations_total",
 			Help: "Total number of validations",
@@ -45,7 +61,7 @@ var (
 		[]string{"status", "user_id"},
 	)
 
-	validationDuration = promauto.NewHistogramVec(
+	validationDuration = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "validation_duration_seconds",
 			Help:    "Validation duration in seconds",
@@ -55,7 +71,7 @@ var (
 	)
 
 	// Dataset Metrics
-	datasetsTotal = promauto.NewCounterVec(
+	datasetsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "datasets_total",
 			Help: "Total number of datasets",
@@ -63,7 +79,7 @@ var (
 		[]string{"format", "status"},
 	)
 
-	datasetSizeBytes = promauto.NewHistogramVec(
+	datasetSizeBytes = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "dataset_size_bytes",
 			Help:    "Dataset size in bytes",
@@ -73,7 +89,7 @@ var (
 	)
 
 	// Orchestrator Metrics
-	orchestratorRequestsTotal = promauto.NewCounterVec(
+	orchestratorRequestsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "orchestrator_requests_total",
 			Help: "Total number of requests to orchestrator",
@@ -81,7 +97,7 @@ var (
 		[]string{"operation", "status"},
 	)
 
-	orchestratorRequestDuration = promauto.NewHistogramVec(
+	orchestratorRequestDuration = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "orchestrator_request_duration_seconds",
 			Help:    "Orchestrator request duration in seconds",
@@ -91,7 +107,7 @@ var (
 	)
 
 	// Database Metrics
-	dbQueriesTotal = promauto.NewCounterVec(
+	dbQueriesTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "db_queries_total",
 			Help: "Total number of database queries",
@@ -99,7 +115,7 @@ var (
 		[]string{"operation", "status"},
 	)
 
-	dbQueryDuration = promauto.NewHistogramVec(
+	dbQueryDuration = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "db_query_duration_seconds",
 			Help:    "Database query duration in seconds",
@@ -109,7 +125,7 @@ var (
 	)
 
 	// Error Metrics
-	errorsTotal = promauto.NewCounterVec(
+	errorsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "errors_total",
 			Help: "Total number of errors",
@@ -121,6 +137,18 @@ var (
 // PrometheusMiddleware returns a Fiber middleware that records metrics
 func PrometheusMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Do not instrument the scrape endpoint or the health-check endpoints.
+		// These are by far the highest-frequency paths (the ALB health-checks
+		// /health/live continuously), and recording their series while the registry
+		// is concurrently gathered for a /metrics scrape makes the collector emit a
+		// series inconsistently -> /metrics 500 ("collected metric ... was collected
+		// before with the same name and label values"). Excluding health/scrape
+		// endpoints from instrumentation is also standard Prometheus practice.
+		switch c.Path() {
+		case "/metrics", "/health", "/health/live", "/health/ready":
+			return c.Next()
+		}
+
 		start := time.Now()
 
 		// Increment in-flight requests
@@ -130,22 +158,39 @@ func PrometheusMiddleware() fiber.Handler {
 		// Process request
 		err := c.Next()
 
-		// Record metrics
+		// Record metrics.
+		// Use the matched route TEMPLATE (e.g. "/api/v1/validations/:id") rather than
+		// c.Path(): the raw path is backed by a Fiber buffer that is reused across
+		// requests, so retaining it as a label value corrupts the string (e.g.
+		// "/health/livedations") and produces inconsistent/duplicate Prometheus label
+		// sets — which makes the collector error out and /metrics return 500. The route
+		// template is a stable, low-cardinality string.
 		duration := time.Since(start).Seconds()
-		status := c.Response().StatusCode()
+		status := strconv.Itoa(c.Response().StatusCode())
 		method := c.Method()
-		path := c.Path()
+		path := "unmatched"
+		if r := c.Route(); r != nil && r.Path != "" {
+			// Copy so the label value never aliases a reused Fiber buffer.
+			path = utils.CopyString(r.Path)
+		}
 
-		httpRequestsTotal.WithLabelValues(method, path, string(rune(status))).Inc()
+		httpRequestsTotal.WithLabelValues(method, path, status).Inc()
 		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
 
 		return err
 	}
 }
 
-// MetricsHandler returns a Fiber handler for the /metrics endpoint
+// MetricsHandler returns a Fiber handler for the /metrics endpoint.
+// HandlerFor(registry, ...) serves the dedicated registry without
+// InstrumentMetricHandler, so the scrape does not modify the registry it gathers.
+// ErrorHandling: ContinueOnError makes a scrape serve the successfully-gathered
+// metrics with HTTP 200 even if a single series is momentarily inconsistent under
+// concurrent observe+gather, instead of failing the whole scrape with a 500.
 func MetricsHandler() fiber.Handler {
-	return adaptor.HTTPHandler(promhttp.Handler())
+	return adaptor.HTTPHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		ErrorHandling: promhttp.ContinueOnError,
+	}))
 }
 
 // RecordValidation records a validation event

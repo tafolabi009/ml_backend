@@ -47,6 +47,8 @@ type Claims struct {
 	Role      string `json:"role,omitempty"`
 	SessionID string `json:"session_id,omitempty"` // For session tracking
 	TokenType string `json:"token_type,omitempty"` // "access" or "refresh"
+	// Set when an admin is acting as another user; audited on every request.
+	ImpersonatorID string `json:"impersonator_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -58,6 +60,28 @@ func GenerateToken(userID, email, companyID string, expiresIn time.Duration) (st
 // GenerateTokenWithClaims creates an access JWT with full claims
 func GenerateTokenWithClaims(userID, email, username, companyID, role, sessionID string, expiresIn time.Duration) (string, error) {
 	return generateToken(userID, email, username, companyID, role, sessionID, TokenTypeAccess, expiresIn)
+}
+
+// GenerateImpersonationToken mints a short-lived access token for userID that
+// carries the admin's identity in impersonator_id. Every request made with it
+// is audit-logged by the auth middleware and write operations are blocked.
+func GenerateImpersonationToken(userID, email, role, impersonatorID string, expiresIn time.Duration) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID:         userID,
+		Email:          email,
+		Role:           role,
+		TokenType:      TokenTypeAccess,
+		ImpersonatorID: impersonatorID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(expiresIn)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			Subject:   userID,
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
 }
 
 // GenerateRefreshToken creates a refresh JWT. Refresh tokens are rejected by the

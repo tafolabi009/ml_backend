@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -322,7 +323,7 @@ func LoginFiber(c *fiber.Ctx) error {
 		}
 		_ = userRepo.UpdateLoginAttempts(ctx, user.ID, user.FailedLoginAttempts, user.LockedUntil)
 
-		logSecurityEvent(ctx, user.ID, "login_failed", false, c.IP(), c.Get("User-Agent"), map[string]string{"reason": "invalid_password", "attempts": string(rune(user.FailedLoginAttempts))})
+		logSecurityEvent(ctx, user.ID, "login_failed", false, c.IP(), c.Get("User-Agent"), map[string]string{"reason": "invalid_password", "attempts": strconv.Itoa(user.FailedLoginAttempts)})
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "INVALID_CREDENTIALS",

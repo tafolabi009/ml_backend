@@ -116,7 +116,7 @@ func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 
 // Clients holds all gRPC client connections with advanced features
 type Clients struct {
-	Validation validationpb.ValidationServiceClient
+	Validation validationpb.ValidationEngineClient
 	Collapse   collapsepb.CollapseServiceClient
 	Data       datapb.DataServiceClient
 
@@ -249,7 +249,7 @@ func NewClientsWithConfig(validationAddr, collapseAddr, dataAddr string, retryCo
 		return nil, fmt.Errorf("failed to connect to validation service: %w", err)
 	}
 	clients.validationConn = validationConn
-	clients.Validation = validationpb.NewValidationServiceClient(validationConn)
+	clients.Validation = validationpb.NewValidationEngineClient(validationConn)
 
 	// Connect to collapse service
 	log.Printf("Connecting to Collapse Service at %s", collapseAddr)
@@ -294,10 +294,11 @@ func (c *Clients) Close() {
 
 // Health checks all gRPC services
 func (c *Clients) Health(ctx context.Context) error {
-	// Check validation service
-	_, err := c.Validation.GetTrainingProgress(ctx, &validationpb.ProgressRequest{JobId: "health-check"})
-	if err != nil && err.Error() != "rpc error: code = NotFound desc = Job health-check not found" {
-		return fmt.Errorf("validation service health check failed: %w", err)
+	// Validation service: the ValidationEngine contract has no lightweight ping
+	// RPC, so verify the client is initialized (connection-level health is
+	// enforced by the gRPC client and circuit breakers on real calls).
+	if c.Validation == nil {
+		return fmt.Errorf("validation client not initialized")
 	}
 
 	// Additional health checks can be added here
@@ -305,7 +306,7 @@ func (c *Clients) Health(ctx context.Context) error {
 }
 
 // CallValidationWithRetry calls validation service with circuit breaker and retry logic
-func (c *Clients) CallValidationWithRetry(ctx context.Context, fn func(context.Context, validationpb.ValidationServiceClient) error) error {
+func (c *Clients) CallValidationWithRetry(ctx context.Context, fn func(context.Context, validationpb.ValidationEngineClient) error) error {
 	return c.validationCB.Call(func() error {
 		return c.RetryWithBackoff(ctx, func() error {
 			return fn(ctx, c.Validation)

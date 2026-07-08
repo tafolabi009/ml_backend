@@ -208,6 +208,10 @@ func ApproveWarrantyFiber(c *fiber.Ctx) error {
 	adminID := c.Locals("user_id").(string)
 	log.Printf("Warranty %s approved by admin %s", warrantyID, adminID)
 
+	insertNotification(ctx, warranty.UserID, "warranty_approved",
+		"Warranty approved",
+		fmt.Sprintf("Your quality warranty %s is now active until %s.", warrantyID, endDate.Format("2006-01-02")))
+
 	return c.JSON(fiber.Map{
 		"warranty_id": warrantyID,
 		"status":      "active",
@@ -269,6 +273,10 @@ func RejectWarrantyFiber(c *fiber.Ctx) error {
 	adminID := c.Locals("user_id").(string)
 	log.Printf("Warranty %s rejected by admin %s: %s", warrantyID, adminID, req.Reason)
 
+	insertNotification(ctx, warranty.UserID, "warranty_rejected",
+		"Warranty request rejected",
+		fmt.Sprintf("Your warranty request %s was rejected: %s", warrantyID, req.Reason))
+
 	return c.JSON(fiber.Map{
 		"warranty_id": warrantyID,
 		"status":      "rejected",
@@ -312,7 +320,7 @@ func ProcessWarrantyClaimFiber(c *fiber.Ctx) error {
 	warrantyRepo := repository.NewWarrantyRepository(database.GetDB())
 
 	// Verify warranty exists
-	_, err := warrantyRepo.GetByID(ctx, warrantyID)
+	warranty, err := warrantyRepo.GetByID(ctx, warrantyID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": fiber.Map{
@@ -371,6 +379,10 @@ func ProcessWarrantyClaimFiber(c *fiber.Ctx) error {
 	processedBy := c.Locals("user_id").(string)
 	log.Printf("Claim %s for warranty %s processed by %s: status=%s", claimID, warrantyID, processedBy, req.Status)
 
+	insertNotification(ctx, warranty.UserID, "warranty_claim_"+req.Status,
+		fmt.Sprintf("Warranty claim %s", req.Status),
+		fmt.Sprintf("Your claim %s on warranty %s was %s. %s", claimID, warrantyID, req.Status, req.Resolution))
+
 	return c.JSON(fiber.Map{
 		"claim_id":     claimID,
 		"warranty_id":  warrantyID,
@@ -421,7 +433,7 @@ func ListAllWarrantiesFiber(c *fiber.Ctx) error {
 	// Fetch warranties
 	offset := (page - 1) * pageSize
 	query := `SELECT id, validation_id, user_id, status, warranty_type, coverage_amount,
-	                 start_date, end_date, terms, created_at, approved_at, rejected_at, rejection_reason
+	                 start_date, end_date, terms, created_at, approved_at, rejected_at, COALESCE(rejection_reason, '')
 	          FROM warranties`
 	args := []interface{}{}
 	argIdx := 1
@@ -476,7 +488,13 @@ func ListWarrantiesFiber(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page < 1 {
+		page = 1
+	}
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

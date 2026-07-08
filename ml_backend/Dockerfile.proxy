@@ -1,0 +1,109 @@
+# Production Dockerfile for ML Backend Services
+# Serves ValidationEngine, CollapseEngine, and DataService via gRPC
+# With NVIDIA GPU support, PostgreSQL, and Redis
+
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+COPY ca-bundle.crt /tmp/ca.crt
+RUN cp /tmp/ca.crt /etc/ssl/certs/ca-certificates.crt 2>/dev/null || { mkdir -p /etc/ssl/certs && cp /tmp/ca.crt /etc/ssl/certs/ca-certificates.crt; }
+ENV PIP_CERT=/tmp/ca.crt REQUESTS_CA_BUNDLE=/tmp/ca.crt SSL_CERT_FILE=/tmp/ca.crt GIT_SSL_CAINFO=/tmp/ca.crt CURL_CA_BUNDLE=/tmp/ca.crt
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    git \
+    curl \
+    wget \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install additional production dependencies
+RUN pip install --no-cache-dir \
+    asyncpg>=0.29.0 \
+    redis>=5.0.0 \
+    uvloop>=0.19.0 \
+    orjson>=3.9.0
+
+# Install Temporal Eigenstate Networks (TEN) — the core model package (REQUIRED).
+# Provides the `ten` module (from ten import TEN); without it the engine degrades to mocks.
+RUN pip install --no-cache-dir "git+https://github.com/genovotechnologies/temporal-eigenstate-networks.git" \
+    && python -c "import ten; from ten import TEN; print('TEN import OK')"
+
+# Install legacy Resonance NN (NEURON_NEW) for backward-compat aliases (best-effort)
+RUN pip install --no-cache-dir git+https://github.com/tafolabi009/NEURON_NEW.git || true
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+COPY proto/ ./proto/
+COPY server.py ./
+COPY server_production.py ./
+
+# Create necessary directories
+RUN mkdir -p /models /cache /data/signatures /logs
+
+# Create non-root user
+RUN groupadd -r synthos && useradd -r -g synthos synthos && \
+    chown -R synthos:synthos /app /models /cache /data /logs
+
+# Switch to non-root user
+USER synthos
+
+# Expose gRPC ports
+EXPOSE 50051 50052 50054
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import grpc; channel = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(channel).result(timeout=5)" || exit 1
+
+# Environment variables (defaults - override via AWS Secrets Manager)
+ENV VALIDATION_SERVICE_PORT=50051 \
+    COLLAPSE_SERVICE_PORT=50052 \
+    DATA_SERVICE_PORT=50054 \
+    SERVICE_HOST=0.0.0.0 \
+    GRPC_MAX_WORKERS=10 \
+    GRPC_MAX_MESSAGE_SIZE=100000000 \
+    # GPU Auto-Configuration (set via Secrets Manager)
+    GPU_TIER=auto \
+    MAX_GPU_MEMORY_FRACTION=0.9 \
+    ENABLE_MIXED_PRECISION=true \
+    FORCE_SEQUENTIAL_TRAINING=false \
+    # Validation thresholds
+    COLLAPSE_THRESHOLD=65.0 \
+    DIVERSITY_THRESHOLD=50.0 \
+    # Legacy (for backward compatibility)
+    GPU_MEMORY_FRACTION=0.8
+
+# Labels
+LABEL maintainer="SynthOS Team <team@synthos.ai>" \
+    org.opencontainers.image.title="SynthOS ML Backend" \
+    org.opencontainers.image.description="Production ML Backend with GPU support" \
+    org.opencontainers.image.vendor="SynthOS"
+
+# Run production server
+CMD ["python", "server_production.py"]

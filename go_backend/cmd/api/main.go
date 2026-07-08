@@ -114,6 +114,33 @@ func main() {
 	// Set package-level validation client for standalone handler functions
 	handlers.SetValidationClient(validationClient)
 
+	// Shared storage client for sidecar reads (privacy reports)
+	if s3Client != nil {
+		handlers.SetStorageClient(s3Client)
+	}
+
+	// Reports bucket client for generated PDF artifacts (report/certificate)
+	if cfg.CloudProvider != "gcp" {
+		reportsCfg := storage.S3Config{
+			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
+			Bucket:          getEnvOrDefault("REPORTS_BUCKET", "synthos-reports-us-east-1"),
+			AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			Endpoint:        os.Getenv("S3_ENDPOINT"),
+			UsePathStyle:    os.Getenv("S3_USE_PATH_STYLE") == "true",
+		}
+		if reportsClient, rerr := storage.NewS3Client(ctx, reportsCfg); rerr == nil {
+			handlers.SetReportsStorage(reportsClient)
+			log.Printf("✅ Reports storage initialized for bucket: %s", reportsCfg.Bucket)
+		} else {
+			log.Printf("⚠️ Reports storage unavailable (artifact links disabled): %v", rerr)
+		}
+	}
+
+	// Background scheduler: drift monitors, failed-validation refunds,
+	// idempotency-key purge. Multi-instance safe; disable with MONITOR_SCHEDULER=off.
+	handlers.StartMonitorScheduler(ctx)
+
 	// Initialize DatasetHandler with dependencies (Dependency Injection)
 	datasetRepo := repository.NewDatasetRepository(database.GetDB())
 	var datasetHandler *handlers.DatasetHandler
@@ -175,7 +202,7 @@ func main() {
 		corsOrigins = "https://synthos.dev,https://www.synthos.dev,https://app.synthos.dev"
 	}
 	log.Printf("CORS Origins configured: %s", corsOrigins)
-	
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     corsOrigins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
@@ -225,6 +252,10 @@ func main() {
 		return c.JSON(fiber.Map{"status": "alive"})
 	})
 	app.Get("/health/ready", readinessHandler(grpcClients))
+	app.Get("/health/uptime", handlers.GetUptimeFiber)
+
+	// Paddle billing webhook (public; HMAC signature-verified in the handler)
+	app.Post("/webhooks/paddle", handlers.PaddleWebhookFiber)
 
 	// Prometheus metrics endpoint
 	if cfg.EnableMetrics {
@@ -249,6 +280,14 @@ func main() {
 
 		// Promo code validation (public - for signup flow)
 		v1.Get("/promo/validate", handlers.ValidatePromoCodeFiber)
+
+		// Shared report links (public — the token IS the credential)
+		v1.Get("/shared/reports/:token", handlers.GetSharedReportFiber)
+
+		// Certificate verification (public — third parties verify authenticity)
+		v1.Get("/certificates/public-key", handlers.GetCertificatePublicKeyFiber)
+		v1.Post("/certificates/verify", handlers.VerifyCertificateFiber)
+		v1.Get("/certificates/:id/verify", handlers.VerifyCertificateByIDFiber)
 
 		// Bootstrap: promote authenticated user to admin (only works if no admins exist)
 		v1.Post("/bootstrap/admin", middleware.AuthRequiredFiber(), func(c *fiber.Ctx) error {
@@ -291,6 +330,11 @@ func main() {
 			authProtected.Post("/2fa/disable", handlers.TwoFactorDisableFiber)
 		}
 
+		// 2FA contract endpoints (status/enroll/activate)
+		authProtected.Get("/2fa/status", handlers.TwoFactorStatusFiber)
+		authProtected.Post("/2fa/enroll", handlers.TwoFactorEnrollFiber)
+		authProtected.Post("/2fa/activate", handlers.TwoFactorActivateFiber)
+
 		// Session management
 		authProtected.Get("/sessions", handlers.ListSessionsFiber)
 		authProtected.Delete("/sessions/:id", handlers.RevokeSessionFiber)
@@ -308,6 +352,7 @@ func main() {
 		{
 			notifications.Get("", handlers.GetNotificationsFiber)
 			notifications.Post("/read", handlers.MarkNotificationsReadFiber)
+			notifications.Delete("/:id", handlers.DeleteNotificationFiber)
 		}
 
 		// Protected routes (require authentication)
@@ -320,6 +365,12 @@ func main() {
 				datasets.Post("/:id/complete", middleware.RequireScopes("write:datasets"), datasetHandler.CompleteUploadFiber)
 				datasets.Get("", middleware.RequireScopes("read:datasets"), datasetHandler.ListDatasetsFiber)
 				datasets.Get("/:id", middleware.RequireScopes("read:datasets"), datasetHandler.GetDatasetFiber)
+				datasets.Get("/:id/history", middleware.RequireScopes("read:datasets"), handlers.GetDatasetHistoryFiber)
+				datasets.Get("/:id/preview", middleware.RequireScopes("read:datasets"), handlers.GetDatasetPreviewFiber)
+				datasets.Get("/:id/stats", middleware.RequireScopes("read:datasets"), handlers.GetDatasetStatsFiber)
+				datasets.Post("/:id/schedule", middleware.RequireScopes("write:validations"), handlers.UpsertDatasetScheduleFiber)
+				datasets.Get("/:id/schedule", middleware.RequireScopes("read:validations"), handlers.GetDatasetScheduleFiber)
+				datasets.Delete("/:id/schedule", middleware.RequireScopes("write:validations"), handlers.DeleteDatasetScheduleFiber)
 				datasets.Delete("/:id", middleware.RequireScopes("write:datasets"), datasetHandler.DeleteDatasetFiber)
 			}
 
@@ -330,11 +381,42 @@ func main() {
 				validations.Get("", middleware.RequireScopes("read:validations"), handlers.ListValidationsFiber)
 				validations.Get("/compare", middleware.RequireScopes("read:validations"), handlers.CompareValidationsFiber)
 				validations.Get("/:id", middleware.RequireScopes("read:validations"), handlers.GetValidationFiber)
+				validations.Patch("/:id", middleware.RequireScopes("write:validations"), handlers.RenameValidationFiber)
+				validations.Get("/:id/progress", middleware.RequireScopes("read:validations"), handlers.GetValidationProgressFiber)
+				validations.Get("/:id/findings", middleware.RequireScopes("read:validations"), handlers.GetValidationFindingsFiber)
 				validations.Get("/:id/report", middleware.RequireScopes("read:validations"), handlers.GetValidationReportFiber)
 				validations.Get("/:id/certificate", middleware.RequireScopes("read:validations"), handlers.GetValidationCertificateFiber)
+				validations.Get("/:id/certificate.json", middleware.RequireScopes("read:validations"), handlers.GetSignedCertificateFiber)
 				validations.Get("/:id/collapse-details", middleware.RequireScopes("read:validations"), handlers.GetCollapseDetailsFiber)
 				validations.Get("/:id/recommendations", middleware.RequireScopes("read:validations"), handlers.GetRecommendationsFiber)
+				validations.Get("/:id/datasheet", middleware.RequireScopes("read:validations"), handlers.GetValidationDatasheetFiber)
+				validations.Get("/:id/privacy", middleware.RequireScopes("read:validations"), handlers.GetValidationPrivacyFiber)
+				validations.Post("/:id/outcome", middleware.RequireScopes("write:validations"), handlers.RecordValidationOutcomeFiber)
+				validations.Get("/:id/outcome", middleware.RequireScopes("read:validations"), handlers.GetValidationOutcomeFiber)
+				validations.Post("/:id/share", middleware.RequireScopes("write:validations"), handlers.CreateReportShareFiber)
+				validations.Get("/:id/shares", middleware.RequireScopes("read:validations"), handlers.ListReportSharesFiber)
+				validations.Delete("/:id/share/:token", middleware.RequireScopes("write:validations"), handlers.RevokeReportShareFiber)
 				validations.Post("/:id/cancel", middleware.RequireScopes("write:validations"), handlers.CancelValidationFiber)
+			}
+
+			// Continuous drift monitors
+			monitors := protected.Group("/monitors")
+			{
+				monitors.Post("", middleware.RequireScopes("write:validations"), handlers.CreateMonitorFiber)
+				monitors.Get("", middleware.RequireScopes("read:validations"), handlers.ListMonitorsFiber)
+				monitors.Get("/:id", middleware.RequireScopes("read:validations"), handlers.GetMonitorFiber)
+				monitors.Patch("/:id", middleware.RequireScopes("write:validations"), handlers.UpdateMonitorFiber)
+				monitors.Delete("/:id", middleware.RequireScopes("write:validations"), handlers.DeleteMonitorFiber)
+			}
+
+			// Effective quota + usage for the caller
+			protected.Get("/quota", handlers.GetMyQuotaFiber)
+
+			// Dataset groups
+			datasetGroups := protected.Group("/dataset-groups")
+			{
+				datasetGroups.Get("", middleware.RequireScopes("read:datasets"), handlers.ListDatasetGroupsFiber)
+				datasetGroups.Delete("/:id", middleware.RequireScopes("write:datasets"), handlers.DeleteDatasetGroupFiber)
 			}
 
 			// Warranty management
@@ -353,6 +435,7 @@ func main() {
 				credits.Get("/packages", handlers.GetCreditPackagesFiber)
 				credits.Post("/purchase", handlers.PurchaseCreditsFiber)
 				credits.Get("/history", handlers.GetCreditHistoryFiber)
+				credits.Get("/usage-series", handlers.GetCreditUsageSeriesFiber)
 				credits.Post("/redeem", handlers.RedeemPromoCodeFiber)
 			}
 
@@ -363,6 +446,7 @@ func main() {
 				analytics.Get("/validation-history", middleware.RequireScopes("read:analytics"), handlers.GetValidationHistoryFiber)
 				analytics.Get("/benchmarks", middleware.RequireScopes("read:analytics"), handlers.GetBenchmarksFiber)
 				analytics.Get("/quality-trends", middleware.RequireScopes("read:analytics"), handlers.GetQualityTrendsFiber)
+				analytics.Get("/calibration", middleware.RequireScopes("read:analytics"), handlers.GetCalibrationFiber)
 			}
 
 			// Webhook management (any authenticated user)
@@ -409,6 +493,12 @@ func main() {
 			adminRoutes.Get("/audit-log", handlers.GetAuditLogFiber)
 			adminRoutes.Get("/settings", handlers.GetPlatformSettingsFiber)
 			adminRoutes.Patch("/settings", handlers.UpdatePlatformSettingsFiber)
+			adminRoutes.Get("/calibration", handlers.GetCalibrationAdminFiber)
+			adminRoutes.Get("/analytics/growth", handlers.GetAdminGrowthFiber)
+			adminRoutes.Get("/metrics", handlers.GetAdminMetricsFiber)
+			adminRoutes.Post("/impersonate", handlers.ImpersonateUserFiber)
+			adminRoutes.Get("/users/:id/quotas", handlers.GetUserQuotaAdminFiber)
+			adminRoutes.Patch("/users/:id/quotas", handlers.UpdateUserQuotaAdminFiber)
 		}
 
 		// Support routes (support role required - admin/developer also pass via hierarchy)
@@ -495,6 +585,18 @@ func healthHandler(grpcClients *grpcclient.ProductionClients) fiber.Handler {
 			health["database"] = "unhealthy"
 			health["status"] = "degraded"
 		}
+
+		// Maintenance flag from admin platform settings (best effort).
+		maintenance := false
+		if db := database.GetDB(); db != nil {
+			hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+			var v string
+			if err := db.QueryRow(hctx, `SELECT value FROM platform_settings WHERE key = 'maintenance_mode'`).Scan(&v); err == nil {
+				maintenance = v == "true" || v == `"true"`
+			}
+			hcancel()
+		}
+		health["maintenance_mode"] = maintenance
 
 		return c.JSON(health)
 	}

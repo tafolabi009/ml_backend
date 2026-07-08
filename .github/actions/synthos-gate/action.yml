@@ -1,0 +1,70 @@
+name: "Synthos Data Quality Gate"
+description: >
+  Validate a dataset with Synthos and fail the build if the collapse-risk
+  score exceeds the threshold. Wire it into any pipeline that produces or
+  consumes training data.
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  api-key:
+    description: "Synthos API key (sk_...) — store it as a repository secret"
+    required: true
+  file:
+    description: "Path to the dataset file to validate"
+    required: true
+  max-risk:
+    description: "Maximum allowed risk score (0-100); higher score fails the build"
+    required: false
+    default: "50"
+  validation-type:
+    description: "comprehensive | distribution | correlation | temporal | full"
+    required: false
+    default: "comprehensive"
+  timeout:
+    description: "Seconds to wait for the validation to finish"
+    required: false
+    default: "3600"
+  base-url:
+    description: "API base URL"
+    required: false
+    default: "https://api.synthos.dev/api/v1"
+
+outputs:
+  risk-score:
+    description: "The validation's risk score"
+    value: ${{ steps.gate.outputs.risk-score }}
+  validation-id:
+    description: "The validation job ID"
+    value: ${{ steps.gate.outputs.validation-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Synthos SDK
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}/../../../sdk/python"
+
+    - name: Run quality gate
+      id: gate
+      shell: bash
+      env:
+        SYNTHOS_API_KEY: ${{ inputs.api-key }}
+      run: |
+        set -o pipefail
+        synthos --base-url "${{ inputs.base-url }}" --json \
+          validate "${{ inputs.file }}" \
+          --type "${{ inputs.validation-type }}" \
+          --max-risk "${{ inputs.max-risk }}" \
+          --timeout "${{ inputs.timeout }}" | tee synthos_result.json
+        python - << 'EOF' >> "$GITHUB_OUTPUT"
+        import json
+        try:
+            with open("synthos_result.json") as fh:
+                data = json.load(fh)
+            print(f"risk-score={data.get('risk_score', '')}")
+            print(f"validation-id={data.get('validation_id', '')}")
+        except Exception:
+            pass
+        EOF
