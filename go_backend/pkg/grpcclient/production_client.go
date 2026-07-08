@@ -63,7 +63,7 @@ func DefaultProductionConfig() ProductionClientConfig {
 
 // ProductionClients holds all production gRPC clients
 type ProductionClients struct {
-	Validation validationpb.ValidationServiceClient
+	Validation validationpb.ValidationEngineClient
 	Collapse   collapsepb.CollapseServiceClient
 	
 	validationConn *grpc.ClientConn
@@ -126,7 +126,7 @@ func NewProductionClients(ctx context.Context, cfg ProductionClientConfig) (*Pro
 	}
 	
 	clients := &ProductionClients{
-		Validation:     validationpb.NewValidationServiceClient(validationConn),
+		Validation:     validationpb.NewValidationEngineClient(validationConn),
 		Collapse:       collapsepb.NewCollapseServiceClient(collapseConn),
 		validationConn: validationConn,
 		collapseConn:   collapseConn,
@@ -164,7 +164,7 @@ func (c *ProductionClients) Close() error {
 }
 
 // CallValidation calls validation service with circuit breaker
-func (c *ProductionClients) CallValidation(ctx context.Context, fn func(validationpb.ValidationServiceClient) error) error {
+func (c *ProductionClients) CallValidation(ctx context.Context, fn func(validationpb.ValidationEngineClient) error) error {
 	return c.validationCB.Call(func() error {
 		return fn(c.Validation)
 	})

@@ -759,7 +759,7 @@ func GetRecentLogsFiber(c *fiber.Ctx) error {
 	db := database.GetDB()
 
 	rows, err := db.Query(ctx,
-		`SELECT id, user_id, event_type, success, ip_address, user_agent, COALESCE(location, ''), COALESCE(details, ''), created_at
+		`SELECT id, COALESCE(user_id, ''), event_type, success, COALESCE(ip_address, ''), COALESCE(user_agent, ''), COALESCE(location, ''), COALESCE(details::text, ''), created_at
 		 FROM security_events
 		 ORDER BY created_at DESC
 		 LIMIT $1`, limit)

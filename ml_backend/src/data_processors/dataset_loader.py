@@ -10,6 +10,8 @@ import pyarrow as pa
 import h5py
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Union, Iterator, Dict, Any, Optional, List
 from dataclasses import dataclass
@@ -17,6 +19,40 @@ import numpy as np
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_local_path(file_path) -> str:
+    """Return a local filesystem path for a dataset.
+
+    If file_path already points to a local file, it's returned unchanged.
+    Otherwise it's treated as an S3 object — either an ``s3://bucket/key`` URI or
+    a bare key in ``STORAGE_BUCKET_NAME``/``S3_BUCKET`` — and downloaded to a temp
+    file using the task's IAM credentials (no static keys required).
+    """
+    p = str(file_path)
+    if os.path.exists(p):
+        return p
+
+    bucket = None
+    key = p
+    if p.startswith("s3://"):
+        bucket, _, key = p[5:].partition("/")
+    if not bucket:
+        bucket = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("S3_BUCKET")
+    if not bucket:
+        raise FileNotFoundError(
+            f"File {p} does not exist locally and no S3 bucket is configured "
+            f"(set STORAGE_BUCKET_NAME or S3_BUCKET)"
+        )
+
+    import boto3  # imported lazily so non-S3 deployments don't require it
+
+    local = os.path.join(tempfile.gettempdir(), os.path.basename(key) or "dataset")
+    logger.info(f"Fetching dataset from s3://{bucket}/{key} -> {local}")
+    boto3.client("s3", region_name=os.environ.get("AWS_REGION")).download_file(
+        bucket, key, local
+    )
+    return local
 
 
 class DatasetFormat(Enum):
@@ -99,7 +135,7 @@ class DatasetLoader:
         Get dataset metadata without loading full dataset.
         Fast preview of dataset characteristics.
         """
-        file_path = Path(file_path)
+        file_path = Path(_resolve_local_path(file_path))
         format_type = self.detect_format(file_path)
         
         logger.info(f"Analyzing metadata for {file_path.name} ({format_type.value})")
@@ -126,7 +162,7 @@ class DatasetLoader:
             format_type: Optional explicit format override (e.g. 'csv', 'parquet').
                 Falls back to extension-based detection if omitted or unrecognized.
         """
-        file_path = Path(file_path)
+        file_path = Path(_resolve_local_path(file_path))
         fmt: Optional[DatasetFormat] = None
         if format_type:
             try:
@@ -186,7 +222,7 @@ class DatasetLoader:
         Yields:
             DataFrame chunks of specified size
         """
-        file_path = Path(file_path)
+        file_path = Path(_resolve_local_path(file_path))
         format_type = self.detect_format(file_path)
         chunk_size = chunk_size or self.chunk_size
         

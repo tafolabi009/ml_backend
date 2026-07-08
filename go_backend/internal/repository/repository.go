@@ -220,11 +220,12 @@ func (r *DatasetRepository) GetByID(ctx context.Context, datasetID string) (*mod
 }
 
 // List retrieves datasets for a user with pagination
-func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageSize int) ([]models.Dataset, int, error) {
+func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageSize int, search string) ([]models.Dataset, int, error) {
+	searchPattern := "%" + search + "%"
 	// Get total count
 	var totalCount int
-	countQuery := `SELECT COUNT(*) FROM datasets WHERE user_id = $1`
-	err := r.db.QueryRow(ctx, countQuery, userID).Scan(&totalCount)
+	countQuery := `SELECT COUNT(*) FROM datasets WHERE user_id = $1 AND ($2 = '%%' OR filename ILIKE $2)`
+	err := r.db.QueryRow(ctx, countQuery, userID, searchPattern).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count datasets: %w", err)
 	}
@@ -232,15 +233,17 @@ func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageS
 	// Get datasets
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, user_id, filename, file_size, file_type, status, s3_path,
-		       row_count, column_count, description, uploaded_at, processed_at
-		FROM datasets
-		WHERE user_id = $1
-		ORDER BY uploaded_at DESC
+		SELECT d.id, d.user_id, d.filename, d.file_size, d.file_type, d.status, d.s3_path,
+		       d.row_count, d.column_count, d.description, d.uploaded_at, d.processed_at,
+		       d.group_id, g.name
+		FROM datasets d
+		LEFT JOIN dataset_groups g ON g.id = d.group_id
+		WHERE d.user_id = $1 AND ($4 = '%%' OR d.filename ILIKE $4)
+		ORDER BY d.uploaded_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
-	rows, err := r.db.Query(ctx, query, userID, pageSize, offset)
+	rows, err := r.db.Query(ctx, query, userID, pageSize, offset, searchPattern)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list datasets: %w", err)
 	}
@@ -262,6 +265,8 @@ func (r *DatasetRepository) List(ctx context.Context, userID string, page, pageS
 			&dataset.Description,
 			&dataset.UploadedAt,
 			&dataset.ProcessedAt,
+			&dataset.GroupID,
+			&dataset.GroupName,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan dataset: %w", err)
@@ -341,8 +346,9 @@ func (r *ValidationRepository) Create(ctx context.Context, validation *models.Va
 // GetByID retrieves a validation by ID
 func (r *ValidationRepository) GetByID(ctx context.Context, validationID string) (*models.Validation, error) {
 	query := `
-		SELECT id, dataset_id, user_id, status, risk_score, risk_level, recommendation,
-		       warranty_eligible, created_at, started_at, completed_at, estimated_completion, error_message
+		SELECT id, name, COALESCE(dataset_id, ''), user_id, status, risk_score, risk_level, recommendation,
+		       warranty_eligible, created_at, started_at, completed_at,
+		       COALESCE(estimated_completion, created_at), error_message
 		FROM validations
 		WHERE id = $1
 	`
@@ -350,6 +356,7 @@ func (r *ValidationRepository) GetByID(ctx context.Context, validationID string)
 	validation := &models.Validation{}
 	err := r.db.QueryRow(ctx, query, validationID).Scan(
 		&validation.ID,
+		&validation.Name,
 		&validation.DatasetID,
 		&validation.UserID,
 		&validation.Status,
@@ -384,8 +391,9 @@ func (r *ValidationRepository) List(ctx context.Context, userID string, page, pa
 	// Get validations
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, dataset_id, user_id, status, risk_score, risk_level, recommendation,
-		       warranty_eligible, created_at, started_at, completed_at, estimated_completion
+		SELECT id, COALESCE(dataset_id, ''), user_id, status, risk_score, risk_level, recommendation,
+		       warranty_eligible, created_at, started_at, completed_at,
+		       COALESCE(estimated_completion, created_at)
 		FROM validations
 		WHERE user_id = $1
 		ORDER BY created_at DESC

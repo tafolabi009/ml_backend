@@ -22,7 +22,7 @@ func GetUsageAnalyticsFiber(c *fiber.Ctx) error {
 	defer cancel()
 
 	datasetRepo := repository.NewDatasetRepository(database.GetDB())
-	datasets, totalDatasets, err := datasetRepo.List(ctx, userID, 1, 1000)
+	datasets, totalDatasets, err := datasetRepo.List(ctx, userID, 1, 1000, "")
 	if err != nil {
 		log.Printf("Failed to fetch datasets: %v", err)
 		totalDatasets = 0
@@ -271,7 +271,30 @@ func GetBenchmarksFiber(c *fiber.Ctx) error {
 		}
 	}
 
+	// Per-dimension {user, platform} pairs — the shape the dashboard's
+	// benchmark card consumes.
+	dimensionPairs := fiber.Map{}
+	for key, uv := range userDims {
+		pair := fiber.Map{"user": uv, "platform": 0}
+		if pv, ok := platformDims[key]; ok {
+			pair["platform"] = pv
+		}
+		dimensionPairs[key] = pair
+	}
+	for key, pv := range platformDims {
+		if _, ok := dimensionPairs[key]; !ok {
+			dimensionPairs[key] = fiber.Map{"user": 0, "platform": pv}
+		}
+	}
+
 	response := fiber.Map{
+		// Flat fields consumed by the dashboard UI.
+		"user_avg_risk_score":     math.Round(userAvgRisk*10) / 10,
+		"platform_avg_risk_score": math.Round(platformAvgRisk*10) / 10,
+		"percentile":              percentile,
+		"dimensions":              dimensionPairs,
+
+		// Nested variants kept for backward compatibility.
 		"platform_averages": fiber.Map{
 			"risk_score":      int(math.Round(platformAvgRisk)),
 			"median_risk":     int(math.Round(platformMedianRisk)),
@@ -283,7 +306,6 @@ func GetBenchmarksFiber(c *fiber.Ctx) error {
 			"total_completed": userTotalCompleted,
 			"dimensions":      userDims,
 		},
-		"percentile": percentile,
 	}
 
 	return c.JSON(response)
@@ -294,11 +316,11 @@ func GetBenchmarksFiber(c *fiber.Ctx) error {
 func computeDimensionAverages(avgRisk int) fiber.Map {
 	// Base dimension scores (at risk=50 baseline)
 	base := map[string]int{
-		"distribution_fidelity":    82,
-		"feature_correlation":      78,
-		"temporal_consistency":     75,
-		"outlier_detection":        70,
-		"schema_compliance":        90,
+		"distribution_fidelity": 82,
+		"feature_correlation":   78,
+		"temporal_consistency":  75,
+		"outlier_detection":     70,
+		"schema_compliance":     90,
 	}
 	adjustment := (50 - avgRisk) / 5
 	dims := fiber.Map{}

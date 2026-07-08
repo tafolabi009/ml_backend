@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,17 +59,17 @@ func cryptoRandFloat(min, max float64) float64 {
 
 // StoredValidationResults is the structure persisted in the metadata JSONB column.
 type StoredValidationResults struct {
-	RiskScore            int                       `json:"risk_score"`
-	RiskLevel            string                    `json:"risk_level"`
-	ValidationType       string                    `json:"validation_type"`
-	CollapseProbability  float64                   `json:"collapse_probability"`
-	Dimensions           map[string]int            `json:"dimensions"`
+	RiskScore            int                         `json:"risk_score"`
+	RiskLevel            string                      `json:"risk_level"`
+	ValidationType       string                      `json:"validation_type"`
+	CollapseProbability  float64                     `json:"collapse_probability"`
+	Dimensions           map[string]int              `json:"dimensions"`
 	PredictedPerformance models.PredictedPerformance `json:"predicted_performance"`
-	Recommendation       string                    `json:"recommendation"`
-	WarrantyEligible     bool                      `json:"warranty_eligible"`
-	Recommendations      []StoredRecommendation    `json:"recommendations"`
-	CollapseDetails      *StoredCollapseDetails    `json:"collapse_details,omitempty"`
-	CompletedAt          string                    `json:"completed_at"`
+	Recommendation       string                      `json:"recommendation"`
+	WarrantyEligible     bool                        `json:"warranty_eligible"`
+	Recommendations      []StoredRecommendation      `json:"recommendations"`
+	CollapseDetails      *StoredCollapseDetails      `json:"collapse_details,omitempty"`
+	CompletedAt          string                      `json:"completed_at"`
 }
 
 // StoredRecommendation is a recommendation stored in metadata.
@@ -81,11 +83,11 @@ type StoredRecommendation struct {
 
 // StoredCollapseDetails is collapse detail stored in metadata.
 type StoredCollapseDetails struct {
-	CollapseDetected   bool                     `json:"collapse_detected"`
-	CollapseType       string                   `json:"collapse_type"`
-	Severity           string                   `json:"severity"`
+	CollapseDetected   bool                       `json:"collapse_detected"`
+	CollapseType       string                     `json:"collapse_type"`
+	Severity           string                     `json:"severity"`
 	AffectedDimensions []models.AffectedDimension `json:"affected_dimensions"`
-	RootCauses         []models.RootCause       `json:"root_causes"`
+	RootCauses         []models.RootCause         `json:"root_causes"`
 }
 
 // simulateValidationCompletion runs asynchronously to simulate ML processing and store results.
@@ -95,30 +97,29 @@ func simulateValidationCompletion(db *pgxpool.Pool, validationID, validationType
 	// Simulate processing start
 	now := time.Now()
 	_, err := db.Exec(ctx,
-		`UPDATE validations SET status = 'processing', started_at = $2, current_stage = 'diversity_analysis', progress = 0.1 WHERE id = $1`,
+		`UPDATE validations SET status = 'processing', started_at = $2 WHERE id = $1`,
 		validationID, now)
 	if err != nil {
 		log.Printf("Failed to update validation %s to processing: %v", validationID, err)
 	}
+	recordStage(db, validationID, "diversity_analysis", 10)
 
 	// Simulate processing time: 3-10 seconds
 	delaySec := cryptoRandInt(3, 10)
-	// Progress updates
+	// Progress updates (0-100 scale, matching the real ML worker)
 	stages := []struct {
 		stage    string
 		progress float64
 		sleep    time.Duration
 	}{
-		{"diversity_analysis", 0.25, time.Duration(delaySec/4+1) * time.Second},
-		{"cascade_training", 0.50, time.Duration(delaySec/4+1) * time.Second},
-		{"collapse_detection", 0.75, time.Duration(delaySec/4+1) * time.Second},
-		{"report_generation", 0.90, time.Duration(delaySec/8+1) * time.Second},
+		{"diversity_analysis", 25, time.Duration(delaySec/4+1) * time.Second},
+		{"cascade_training", 50, time.Duration(delaySec/4+1) * time.Second},
+		{"collapse_detection", 75, time.Duration(delaySec/4+1) * time.Second},
+		{"report_generation", 90, time.Duration(delaySec/8+1) * time.Second},
 	}
 	for _, s := range stages {
 		time.Sleep(s.sleep)
-		db.Exec(ctx,
-			`UPDATE validations SET current_stage = $2, progress = $3 WHERE id = $1`,
-			validationID, s.stage, s.progress)
+		recordStage(db, validationID, s.stage, s.progress)
 	}
 
 	// Generate realistic dimension scores based on validation type
@@ -224,7 +225,7 @@ func simulateValidationCompletion(db *pgxpool.Pool, validationID, validationType
 		     warranty_eligible = $5,
 		     metadata = $6,
 		     completed_at = $7,
-		     progress = 1.0,
+		     progress = 100,
 		     current_stage = 'complete',
 		     validation_type = $8
 		 WHERE id = $1`,
@@ -237,6 +238,8 @@ func simulateValidationCompletion(db *pgxpool.Pool, validationID, validationType
 
 	log.Printf("Validation %s completed: risk_score=%d, risk_level=%s, type=%s",
 		validationID, riskScore, riskLevel, validationType)
+
+	go finishValidationSideEffects(validationID)
 }
 
 // generateDimensionScores creates realistic per-dimension scores based on validation type.
@@ -557,6 +560,26 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Group validation: validate a whole dataset group as one logical dataset.
+	// MVP: the pipeline runs on the group's largest ready file; the validation
+	// row carries group_id so reports and lists present it as the group.
+	groupID := strings.TrimSpace(req.GroupID)
+	if req.DatasetID == "" && groupID != "" {
+		var primary string
+		gerr := database.GetDB().QueryRow(ctx,
+			`SELECT d.id FROM datasets d
+			 JOIN dataset_groups g ON g.id = d.group_id
+			 WHERE d.group_id = $1 AND g.owner_id = $2 AND d.deleted_at IS NULL
+			   AND d.status IN ('processed', 'ready')
+			 ORDER BY d.file_size DESC LIMIT 1`, groupID, userID).Scan(&primary)
+		if gerr != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": fiber.Map{"code": "GROUP_NOT_READY", "message": "Group not found or has no ready datasets"},
+			})
+		}
+		req.DatasetID = primary
+	}
+
 	// Verify dataset exists and belongs to user
 	datasetRepo := repository.NewDatasetRepository(database.GetDB())
 	dataset, err := datasetRepo.GetByID(ctx, req.DatasetID)
@@ -607,19 +630,25 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		creditCost.CreditsRequired = creditCost.CreditsRequired * 3 / 2
 	}
 
-	// Check and deduct credits
-	refType := "validation"
-	description := fmt.Sprintf("Validation job %s (%s, %s type)", validationID, operation, validationType)
-	_, err = creditRepo.DeductCredits(ctx, userID, creditCost.CreditsRequired, description, &refType, &validationID)
-	if err != nil {
-		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-			"error": fiber.Map{
-				"code":             "INSUFFICIENT_CREDITS",
-				"message":          "You do not have enough credits to run this validation",
-				"credits_required": creditCost.CreditsRequired,
-			},
-		})
+	// Daily validation quota (protects the ML tier and the user's bill).
+	if used, qerr := countValidationsToday(ctx, userID); qerr == nil {
+		if q := getUserQuota(ctx, userID); used >= q.MaxValidationsPerDay {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": fiber.Map{
+					"code":    "QUOTA_EXCEEDED",
+					"message": fmt.Sprintf("Daily validation quota reached (%d per 24h). Contact support to raise it.", q.MaxValidationsPerDay),
+				},
+			})
+		}
 	}
+
+	// Idempotency: a retried request with the same Idempotency-Key must not
+	// charge twice. Claim the key before charging; replays short-circuit here.
+	idem, handled, ierr := beginIdempotency(c, ctx, "validations.create")
+	if handled {
+		return ierr
+	}
+	defer idem.release()
 
 	// Calculate estimated completion based on priority
 	estimatedCompletion := time.Now().Add(24 * time.Hour)
@@ -629,24 +658,33 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		estimatedCompletion = time.Now().Add(48 * time.Hour)
 	}
 
-	// Create validation job in database
+	// Charge credits and create the validation atomically (one transaction):
+	// a crash can no longer record a charge without a job, or vice versa.
+	description := fmt.Sprintf("Validation job %s (%s, %s type)", validationID, operation, validationType)
+	priority := "standard"
+	if req.Options.Priority == "express" {
+		priority = "express"
+	}
+
 	validation := models.Validation{
 		ID:                  validationID,
 		DatasetID:           req.DatasetID,
 		UserID:              userID,
 		Status:              "queued",
 		EstimatedCompletion: estimatedCompletion,
-		CreatedAt:           time.Now().UTC(),
 	}
-
-	validationRepo := repository.NewValidationRepository(database.GetDB())
-	if err := validationRepo.Create(ctx, &validation); err != nil {
-		log.Printf("Failed to create validation: %v", err)
-		// Credits were already deducted above; refund them so the user is not
-		// charged for a validation job that was never created.
-		refundDesc := fmt.Sprintf("Refund for failed validation creation %s", validationID)
-		refundType := "validation_refund"
-		_, _ = creditRepo.AddCredits(ctx, userID, creditCost.CreditsRequired, "refund", refundDesc, &refundType, &validationID)
+	chargeTxn, err := creditRepo.CreateValidationCharged(ctx, &validation, validationType, priority, creditCost.CreditsRequired, description)
+	if err != nil {
+		if errors.Is(err, repository.ErrInsufficientCredits) {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+				"error": fiber.Map{
+					"code":             "INSUFFICIENT_CREDITS",
+					"message":          "You do not have enough credits to run this validation",
+					"credits_required": creditCost.CreditsRequired,
+				},
+			})
+		}
+		log.Printf("Failed to create validation %s: %v", validationID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{
 				"code":    "DATABASE_ERROR",
@@ -655,10 +693,11 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Store validation_type in the DB
-	_, _ = database.GetDB().Exec(ctx,
-		`UPDATE validations SET validation_type = $2 WHERE id = $1`,
-		validationID, validationType)
+	if groupID != "" {
+		_, _ = database.GetDB().Exec(ctx, `UPDATE validations SET group_id = $2 WHERE id = $1`, validationID, groupID)
+	}
+
+	maybeNotifyCreditsLow(ctx, userID, chargeTxn.BalanceAfter)
 
 	// Dispatch webhook event for validation creation
 	webhook.Dispatch("validation.created", userID, fiber.Map{
@@ -667,127 +706,8 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 		"validation_type": validationType,
 	})
 
-	// Dispatch async ML processing (bounded by validationWorkerSem)
-	go func() {
-		validationWorkerSem <- struct{}{}
-		defer func() { <-validationWorkerSem }()
-
-		db := database.GetDB()
-		if validationGRPCClient == nil {
-			log.Printf("No validation gRPC client - using simulated ML processing for %s", validationID)
-			simulateValidationCompletion(db, validationID, validationType)
-			return
-		}
-
-		// Real ML backend processing
-		log.Printf("🔬 Starting real ML processing for validation %s (type=%s)", validationID, validationType)
-
-		// Update status to processing
-		db.Exec(context.Background(), `UPDATE validations SET status = 'processing', current_stage = 'diversity_analysis', progress = 10 WHERE id = $1`, validationID)
-
-		// Get dataset path
-		var datasetPath string
-		err := db.QueryRow(context.Background(), `SELECT COALESCE(s3_path, storage_path, '') FROM datasets WHERE id = $1`, req.DatasetID).Scan(&datasetPath)
-		if err != nil || datasetPath == "" {
-			log.Printf("⚠️ Cannot find dataset path for %s, falling back to simulation", req.DatasetID)
-			simulateValidationCompletion(db, validationID, validationType)
-			return
-		}
-
-		mlCtx, mlCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer mlCancel()
-
-		// Step 1: Diversity Analysis
-		db.Exec(context.Background(), `UPDATE validations SET current_stage = 'diversity_analysis', progress = 20 WHERE id = $1`, validationID)
-		diversityResp, err := validationGRPCClient.AnalyzeDiversity(mlCtx, validationID, datasetPath, nil)
-		if err != nil {
-			log.Printf("⚠️ Diversity analysis failed for %s: %v - falling back to simulation", validationID, err)
-			simulateValidationCompletion(db, validationID, validationType)
-			return
-		}
-
-		// Step 2: Cascade Training
-		db.Exec(context.Background(), `UPDATE validations SET current_stage = 'cascade_training', progress = 50 WHERE id = $1`, validationID)
-		cascadeResp, err := validationGRPCClient.TrainCascade(mlCtx, validationID, datasetPath, nil)
-		if err != nil {
-			log.Printf("⚠️ Cascade training failed for %s: %v - using partial results", validationID, err)
-		}
-
-		// Step 3: Process results from ML backend
-		db.Exec(context.Background(), `UPDATE validations SET current_stage = 'collapse_detection', progress = 80 WHERE id = $1`, validationID)
-
-		// Extract scores from ML response
-		var diversityScore float64
-		if diversityResp != nil && diversityResp.Score != nil {
-			diversityScore = float64(diversityResp.Score.OverallScore)
-		}
-
-		var collapseDetected bool
-		var cascadeAccuracy float64
-		if cascadeResp != nil {
-			for _, r := range cascadeResp.Results {
-				if float64(r.ValidationAccuracy) > cascadeAccuracy {
-					cascadeAccuracy = float64(r.ValidationAccuracy)
-				}
-			}
-			// Detect collapse if validation accuracy drops significantly across tiers
-			if len(cascadeResp.Results) >= 2 {
-				first := cascadeResp.Results[0].ValidationAccuracy
-				last := cascadeResp.Results[len(cascadeResp.Results)-1].ValidationAccuracy
-				collapseDetected = (first - last) > 0.15 // >15% accuracy drop = collapse
-			}
-		}
-
-		// Compute final results from ML output
-		riskScore := int(100 - (diversityScore * 100))
-		if riskScore < 0 { riskScore = 5 }
-		if riskScore > 100 { riskScore = 95 }
-
-		riskLevel := "low"
-		if riskScore >= 60 { riskLevel = "high" }
-		if riskScore >= 30 && riskScore < 60 { riskLevel = "medium" }
-
-		warrantyEligible := riskScore < 50
-
-		// Store real ML results
-		results := map[string]interface{}{
-			"risk_score":        riskScore,
-			"risk_level":        riskLevel,
-			"warranty_eligible": warrantyEligible,
-			"collapse_detected": collapseDetected,
-			"diversity_score":   diversityScore,
-			"cascade_accuracy":  cascadeAccuracy,
-			"ml_processed":      true,
-			"dimensions": map[string]int{
-				"distribution_fidelity": int(diversityScore * 100),
-				"feature_correlation":   int(cascadeAccuracy * 100),
-				"temporal_consistency":  70 + int(diversityScore * 30),
-				"outlier_detection":     65 + int(diversityScore * 35),
-				"schema_compliance":     80 + int(diversityScore * 20),
-			},
-			"collapse_probability": func() float64 { if collapseDetected { return 0.7 }; return float64(riskScore) / 200.0 }(),
-		}
-
-		resultsJSON, _ := json.Marshal(results)
-
-		db.Exec(context.Background(), `UPDATE validations SET current_stage = 'report_generation', progress = 90 WHERE id = $1`, validationID)
-		time.Sleep(2 * time.Second)
-
-		_, err = db.Exec(context.Background(),
-			`UPDATE validations SET status = 'completed', progress = 100, current_stage = 'completed',
-			 risk_score = $1, risk_level = $2, warranty_eligible = $3, metadata = $4,
-			 completed_at = NOW(), updated_at = NOW()
-			 WHERE id = $5`,
-			riskScore, riskLevel, warrantyEligible, resultsJSON, validationID)
-		if err != nil {
-			log.Printf("❌ Failed to store ML results for %s: %v", validationID, err)
-		} else {
-			log.Printf("✅ Real ML processing completed for validation %s: risk=%d, collapse=%v", validationID, riskScore, collapseDetected)
-		}
-
-		// Dispatch webhook
-		webhook.Dispatch("validation.completed", userID, fiber.Map{"validation_id": validationID, "risk_score": riskScore})
-	}()
+	// Run the ML pipeline asynchronously (bounded by validationWorkerSem).
+	go processValidationAsync(validationID, req.DatasetID, userID, validationType)
 
 	response := models.CreateValidationResponse{
 		ValidationID:        validationID,
@@ -801,6 +721,13 @@ func CreateValidationFiber(c *fiber.Ctx) error {
 			{Stage: "collapse_detection", Status: "pending", EstimatedDuration: 21600},
 			{Stage: "report_generation", Status: "pending", EstimatedDuration: 7200},
 		},
+	}
+
+	// Persist the response for idempotent replay before sending it.
+	if idem.active {
+		if b, merr := json.Marshal(response); merr == nil {
+			idem.finish(ctx, fiber.StatusCreated, b)
+		}
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
@@ -927,12 +854,29 @@ func GetValidationFiber(c *fiber.Ctx) error {
 		"created_at":    validation.CreatedAt.Format(time.RFC3339),
 	}
 
+	// User-assigned display name (propagates to reports/certificates).
+	if n := validationDisplayName(ctx, validationID); n != "" {
+		response["name"] = n
+	}
+
 	if validation.StartedAt != nil {
 		response["started_at"] = validation.StartedAt.Format(time.RFC3339)
 	}
 
 	if validation.CompletedAt != nil {
 		response["completed_at"] = validation.CompletedAt.Format(time.RFC3339)
+	}
+
+	// Fresh, time-limited artifact links (populated on completion).
+	if validation.Status == "completed" {
+		if reportURL, certURL := presignedArtifactURLs(ctx, validationID); reportURL != "" || certURL != "" {
+			if reportURL != "" {
+				response["report_url"] = reportURL
+			}
+			if certURL != "" {
+				response["certificate_url"] = certURL
+			}
+		}
 	}
 
 	// Try to load real results from metadata first
@@ -960,9 +904,14 @@ func GetValidationFiber(c *fiber.Ctx) error {
 			if validation.WarrantyEligible != nil {
 				we = *validation.WarrantyEligible
 			}
+			// risk_level is nullable independently of risk_score; guard the deref.
+			rl := "unknown"
+			if validation.RiskLevel != nil {
+				rl = *validation.RiskLevel
+			}
 			response["results"] = models.ValidationResults{
 				RiskScore: *validation.RiskScore,
-				RiskLevel: *validation.RiskLevel,
+				RiskLevel: rl,
 				PredictedPerformance: models.PredictedPerformance{
 					Accuracy:           0.87,
 					ConfidenceInterval: []float64{0.84, 0.90},
@@ -1411,21 +1360,14 @@ func CancelValidationFiber(c *fiber.Ctx) error {
 		})
 	}
 
-	// Refund credits
+	// Refund exactly what was charged, at most once (idempotent under
+	// concurrent cancels and the failure reconciler).
 	creditRepo := repository.NewCreditRepository(database.GetDB())
-	refType := "validation_refund"
-	description := fmt.Sprintf("Refund for cancelled validation %s", validationID)
-	refundAmount := int64(10) // default standard cost
-	// Try to look up what was charged
-	var chargedAmount int64
-	err = database.GetDB().QueryRow(ctx,
-		`SELECT ABS(amount) FROM credit_transactions WHERE reference_id = $1 AND type = 'deduction' ORDER BY created_at DESC LIMIT 1`,
-		validationID).Scan(&chargedAmount)
-	if err == nil && chargedAmount > 0 {
-		refundAmount = chargedAmount
+	refundAmount, _, rerr := creditRepo.RefundValidationCharge(ctx, validationID, userID,
+		fmt.Sprintf("Refund for cancelled validation %s", validationID))
+	if rerr != nil {
+		log.Printf("Refund for cancelled validation %s failed: %v", validationID, rerr)
 	}
-
-	_, _ = creditRepo.AddCredits(ctx, userID, refundAmount, "refund", description, &refType, &validationID)
 
 	webhook.Dispatch("validation.cancelled", userID, fiber.Map{
 		"validation_id": validationID,

@@ -25,7 +25,11 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 	pdf.SetTextColor(0, 0, 0)
 	pdf.Cell(50, 8, "Validation ID:")
 	pdf.SetFont("Arial", "B", 12)
-	pdf.Cell(0, 8, validation.ID)
+	if validation.Name != nil && *validation.Name != "" {
+		pdf.Cell(0, 8, *validation.Name)
+	} else {
+		pdf.Cell(0, 8, validation.ID)
+	}
 	pdf.Ln(8)
 
 	pdf.SetFont("Arial", "", 12)
@@ -116,9 +120,13 @@ func GenerateValidationReport(validation *models.Validation, results *models.Val
 		pdf.SetFont("Arial", "", 12)
 		pdf.Cell(60, 8, "Confidence Interval:")
 		pdf.SetFont("Arial", "B", 12)
-		pdf.Cell(0, 8, fmt.Sprintf("%.2f%% - %.2f%%",
-			results.PredictedPerformance.ConfidenceInterval[0]*100,
-			results.PredictedPerformance.ConfidenceInterval[1]*100))
+		// Guard against a missing/short interval: stored results may carry an empty
+		// ConfidenceInterval, and indexing [0]/[1] unconditionally panics (→ report 500).
+		if ci := results.PredictedPerformance.ConfidenceInterval; len(ci) >= 2 {
+			pdf.Cell(0, 8, fmt.Sprintf("%.2f%% - %.2f%%", ci[0]*100, ci[1]*100))
+		} else {
+			pdf.Cell(0, 8, "N/A")
+		}
 		pdf.Ln(8)
 
 		pdf.SetFont("Arial", "", 12)

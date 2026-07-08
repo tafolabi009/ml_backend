@@ -793,10 +793,13 @@ class DiversityAnalyzer:
         else:
             df = pd.read_csv(data_path)
         
-        # Calculate samples per stratum
+        # Calculate samples per stratum. Clamp to 1.0: when the dataset is
+        # smaller than the target sample we keep every row rather than trying to
+        # upsample (frac>1 without replacement raises "Replace has to be set to
+        # True when upsampling"). Small datasets simply return themselves.
         total_rows = len(df)
-        sample_fraction = target_size / total_rows
-        
+        sample_fraction = min(1.0, target_size / total_rows) if total_rows > 0 else 1.0
+
         # Stratified sampling
         sampled_df = df.groupby(stratify_by, group_keys=False).apply(
             lambda x: x.sample(frac=sample_fraction, random_state=42) if len(x) > 1 else x

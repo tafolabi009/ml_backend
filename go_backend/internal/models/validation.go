@@ -7,6 +7,7 @@ import (
 // Validation represents a validation job
 type Validation struct {
 	ID                  string     `json:"validation_id" db:"id"`
+	Name                *string    `json:"name,omitempty" db:"name"`
 	DatasetID           string     `json:"dataset_id" db:"dataset_id"`
 	UserID              string     `json:"user_id" db:"user_id"`
 	ValidationType      string     `json:"validation_type,omitempty" db:"validation_type"` // comprehensive, distribution, correlation, temporal, full
@@ -25,6 +26,7 @@ type Validation struct {
 // CreateValidationRequest is the request to create a new validation
 type CreateValidationRequest struct {
 	DatasetID      string            `json:"dataset_id" binding:"required"`
+	GroupID        string            `json:"group_id"`
 	ValidationType string            `json:"validation_type" binding:"required"`
 	Options        ValidationOptions `json:"options"`
 }

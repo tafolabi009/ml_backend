@@ -174,6 +174,80 @@ logger = logging.getLogger(__name__)
 # Validation Engine Service Implementation (Complete)
 # ============================================================================
 
+async def _persist_stratified_sample(analyzer, local_path: str, dataset_format: str, dataset_id: str) -> str:
+    """Compute a stratified sample of the dataset and persist it to S3 as parquet.
+
+    The cascade phase (GPU-gated) reads its training input from ``sample_s3_path``;
+    previously that path was advertised but never written, so cascade pointed at a
+    non-existent object. Writing the sample during the (CPU) diversity phase means
+    cascade has representative input ready the moment GPU capacity is available.
+
+    Best-effort: never raises. Returns the ``s3://`` URI on success, "" on failure,
+    so a sampling hiccup can never break the live diversity path.
+    """
+    import os
+    bucket = (os.environ.get("SAMPLES_BUCKET")
+              or os.environ.get("S3_BUCKET")
+              or os.environ.get("STORAGE_BUCKET_NAME")
+              or "synthos-datasets-us-east-1")
+
+    # Build the sample once; privacy screening reuses it. Fall back to loading
+    # the dataset directly if stratified sampling fails, so PII screening still
+    # runs even when sample persistence can't.
+    sample_df = None
+    try:
+        sample_df, _info = await analyzer.create_stratified_sample(local_path, dataset_format)
+    except Exception as e:
+        logger.warning(f"Stratified sampling failed for {dataset_id} ({e}); loading dataset directly for privacy")
+        try:
+            import pandas as pd
+            sample_df = (pd.read_parquet(local_path) if dataset_format == "parquet"
+                         else pd.read_csv(local_path))
+        except Exception as le:
+            logger.warning(f"Could not load dataset {dataset_id} for privacy screening: {le}")
+            sample_df = None
+
+    if sample_df is None:
+        return ""
+
+    import boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+
+    # 1) Persist the stratified sample parquet (cascade's training input).
+    uri = ""
+    try:
+        import io
+        buf = io.BytesIO()
+        sample_df.to_parquet(buf, engine="pyarrow", index=False)
+        key = f"samples/{dataset_id}_sample.parquet"
+        s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+        uri = f"s3://{bucket}/{key}"
+        logger.info(f"Persisted stratified sample ({len(sample_df):,} rows) -> {uri}")
+    except Exception as e:
+        logger.warning(f"Stratified-sample persistence skipped for {dataset_id}: {e}")
+
+    # 2) Privacy / PII screening on the same frame -> sidecar JSON served at
+    # GET /validations/:id/privacy. Independent of sample persistence.
+    try:
+        import json
+        from ..validation_engine.privacy_analyzer import PrivacyAnalyzer
+        privacy_report = PrivacyAnalyzer().analyze(sample_df, sampled=True)
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"samples/{dataset_id}_privacy.json",
+            Body=json.dumps(privacy_report).encode("utf-8"),
+            ContentType="application/json",
+        )
+        logger.info(
+            f"Persisted privacy report for {dataset_id}: "
+            f"score={privacy_report.get('privacy_score')} risk={privacy_report.get('risk_level')}"
+        )
+    except Exception as pe:
+        logger.warning(f"Privacy report skipped for {dataset_id}: {pe}")
+
+    return uri
+
+
 class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
     """
     Complete implementation of ValidationEngine gRPC service.
@@ -219,19 +293,27 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
             
             # Use orchestrator's diversity analyzer
             analyzer = self.orchestrator.diversity_analyzer
-            
-            # Load and analyze dataset
-            from ..data_processors.dataset_loader import DatasetLoader
-            loader = DatasetLoader()
-            dataset = await loader.load_dataset(dataset_path, dataset_format)
-            
+
+            # Resolve the dataset to a local filesystem path (downloads from S3 if
+            # needed). The diversity analyzer streams directly from the path for
+            # memory efficiency, so it expects a path + format string — NOT a
+            # pre-loaded DataFrame.
+            from ..data_processors.dataset_loader import _resolve_local_path
+            local_path = _resolve_local_path(dataset_path)
+
             # Analyze diversity
-            diversity_result = await analyzer.analyze_diversity(dataset, dataset_path)
-            
+            diversity_result = await analyzer.analyze_diversity(local_path, dataset_format)
+
+            # Persist a stratified sample to S3 so the (GPU-gated) cascade phase has
+            # representative input ready. Best-effort — never breaks the diversity path.
+            sample_s3_path = await _persist_stratified_sample(
+                analyzer, local_path, dataset_format, request.dataset_id
+            )
+
             # Create response
             response = validation_pb2.DiversityResponse(
                 dataset_id=request.dataset_id,
-                sample_s3_path=f"s3://synthos-samples/{request.dataset_id}_sample.parquet",
+                sample_s3_path=sample_s3_path,
                 sampling_confidence=int(diversity_result.overall_score)
             )
             

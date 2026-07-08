@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -110,6 +111,14 @@ func PurchaseCreditsFiber(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Idempotency: a retried purchase with the same Idempotency-Key must not
+	// charge or grant credits twice. Replays short-circuit here.
+	idem, handled, ierr := beginIdempotency(c, ctx, "credits.purchase")
+	if handled {
+		return ierr
+	}
+	defer idem.release()
+
 	creditRepo := repository.NewCreditRepository(database.GetDB())
 
 	// Get the package
@@ -171,15 +180,28 @@ func PurchaseCreditsFiber(c *fiber.Ctx) error {
 		response.Balance = *balance
 	}
 
+	// Persist the response for idempotent replay before sending it.
+	if idem.active {
+		if b, merr := json.Marshal(response); merr == nil {
+			idem.finish(ctx, fiber.StatusCreated, b)
+		}
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(response)
 }
 
 func processCreditPayment(ctx context.Context, amountCents int64, currency string, paymentMethod string, description string) error {
 	secretKey := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY"))
 	if secretKey == "" {
-		// Fall back to simulated payment when Stripe is not configured.
-		log.Printf("STRIPE_SECRET_KEY not configured; simulating payment for %s", description)
-		return nil
+		// Fail CLOSED: never grant paid credits without a real charge. A simulated
+		// payment is only permitted when explicitly opted in for local development
+		// (ALLOW_SIMULATED_PAYMENTS=true); otherwise refuse the purchase so an
+		// unconfigured processor can't be used to mint free credits.
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_SIMULATED_PAYMENTS")), "true") {
+			log.Printf("ALLOW_SIMULATED_PAYMENTS=true; simulating payment for %s (dev only)", description)
+			return nil
+		}
+		return fmt.Errorf("payment processing is not configured")
 	}
 
 	stripe.Key = secretKey
@@ -246,4 +268,71 @@ func GetCreditHistoryFiber(c *fiber.Ctx) error {
 			TotalPages: totalPages,
 		},
 	})
+}
+
+// GetCreditUsageSeriesFiber returns a burn-down series for the spend chart.
+// GET /credits/usage-series?period=90d -> {points: [{date, spent, balance}]}
+func GetCreditUsageSeriesFiber(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+
+	days := 90
+	period := c.Query("period", "90d")
+	if strings.HasSuffix(period, "d") {
+		if n, err := strconv.Atoi(strings.TrimSuffix(period, "d")); err == nil && n >= 1 && n <= 365 {
+			days = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := database.GetDB()
+	start := time.Now().AddDate(0, 0, -days)
+
+	// Balance entering the window (forward-fill baseline).
+	var balance int64
+	_ = db.QueryRow(ctx,
+		`SELECT balance_after FROM credit_transactions
+		 WHERE user_id = $1 AND created_at < $2
+		 ORDER BY created_at DESC LIMIT 1`, userID, start).Scan(&balance)
+
+	rows, err := db.Query(ctx,
+		`SELECT created_at::date AS day,
+		        COALESCE(SUM(CASE WHEN type = 'deduction' THEN ABS(amount) ELSE 0 END), 0) AS spent,
+		        (ARRAY_AGG(balance_after ORDER BY created_at DESC))[1] AS eod_balance
+		 FROM credit_transactions
+		 WHERE user_id = $1 AND created_at >= $2
+		 GROUP BY created_at::date
+		 ORDER BY day ASC`, userID, start)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "DATABASE_ERROR", "message": "Failed to load usage series"},
+		})
+	}
+	defer rows.Close()
+
+	type dayRow struct {
+		spent, balance int64
+	}
+	byDay := map[string]dayRow{}
+	for rows.Next() {
+		var day time.Time
+		var spent, eod int64
+		if err := rows.Scan(&day, &spent, &eod); err != nil {
+			continue
+		}
+		byDay[day.Format("2006-01-02")] = dayRow{spent, eod}
+	}
+
+	points := []fiber.Map{}
+	for d := 0; d <= days; d++ {
+		date := start.AddDate(0, 0, d).Format("2006-01-02")
+		spent := int64(0)
+		if row, ok := byDay[date]; ok {
+			spent = row.spent
+			balance = row.balance
+		}
+		points = append(points, fiber.Map{"date": date, "spent": spent, "balance": balance})
+	}
+
+	return c.JSON(fiber.Map{"period": fmt.Sprintf("%dd", days), "points": points})
 }
