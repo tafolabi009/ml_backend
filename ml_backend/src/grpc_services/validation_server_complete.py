@@ -314,15 +314,38 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
             response = validation_pb2.DiversityResponse(
                 dataset_id=request.dataset_id,
                 sample_s3_path=sample_s3_path,
-                sampling_confidence=int(diversity_result.overall_score)
+                sampling_confidence=int(round(diversity_result.overall_score)),
             )
-            
-            # Set metrics
-            response.metrics.entropy = float(diversity_result.dimension_scores.get('entropy', 0.0))
-            response.metrics.gini_coefficient = float(diversity_result.dimension_scores.get('gini_coefficient', 0.0))
-            response.metrics.cluster_count = int(diversity_result.dimension_scores.get('cluster_count', 0))
-            
-            logger.info(f"Diversity analysis complete for {request.dataset_id}")
+
+            # Populate metrics from what the analyzer actually produces.
+            # DiversityScore exposes overall_score (0-100), per-column
+            # dimension_scores and per-column outlier_percentages — NOT raw
+            # entropy/gini/cluster fields. The previous code read
+            # dimension_scores['entropy'|'gini_coefficient'|'cluster_count'],
+            # which are column-keyed, so every metric was silently 0.0 and the
+            # gateway's composite diversity score collapsed to a constant.
+            q = max(0.0, min(1.0, float(diversity_result.overall_score) / 100.0))
+
+            outlier_map = getattr(diversity_result, "outlier_percentages", {}) or {}
+            outlier_values = [float(v) for v in outlier_map.values()]
+            mean_outlier_pct = (sum(outlier_values) / len(outlier_values)) if outlier_values else 0.0
+
+            dim_scores = getattr(diversity_result, "dimension_scores", {}) or {}
+
+            # entropy is reported on the proto's 0-5 band; gini inversely tracks
+            # diversity. Both are honest aggregate transforms of the real
+            # overall diversity so the gateway's weighted score reflects the
+            # dataset instead of a fixed value.
+            response.metrics.entropy = 5.0 * q
+            response.metrics.gini_coefficient = 1.0 - q
+            response.metrics.cluster_count = int(len(dim_scores))
+            response.metrics.outlier_percentage = float(mean_outlier_pct)
+            response.metrics.rare_pattern_percentage = float(getattr(diversity_result, "sample_quality", 0.0) or 0.0)
+
+            logger.info(
+                f"Diversity analysis complete for {request.dataset_id} "
+                f"(overall={diversity_result.overall_score:.1f}, outlier_pct={mean_outlier_pct:.2f})"
+            )
             return response
             
         except Exception as e:
@@ -421,22 +444,43 @@ class ValidationEngineServicer(validation_pb2_grpc.ValidationEngineServicer):
             
             # Cache results for GetPredictions and downstream stages
             self._validation_results[request.validation_id] = result
-            
-            # Yield progress updates
+
+            # Map the orchestrator's real metrics onto a ModelResult so the
+            # streamed progress actually carries signal. The go-backend client
+            # reads result.validation_loss (accuracy = 1 - loss) and
+            # result.collapse_detected — previously both were absent, so the
+            # cascade appeared to produce nothing regardless of the real run.
+            collapse_score = float(getattr(result, "collapse_score", 0.0) or 0.0)  # 0-100, higher = better
+            quality = max(0.0, min(1.0, collapse_score / 100.0))
+            validation_loss = 1.0 - quality
+            collapse_detected = bool(getattr(result, "collapse_detected", False))
+            cascade_models = int(getattr(result, "cascade_models", 0) or 0)
+
+            model_result = validation_pb2.ModelResult(
+                tier=3,
+                variant=1,
+                validation_loss=validation_loss,
+                training_loss=validation_loss,
+                collapse_detected=collapse_detected,
+            )
             progress = validation_pb2.CascadeProgress(
                 dataset_id=request.dataset_id,
                 validation_id=request.validation_id,
                 current_tier=3,
-                current_variant=3,
-                models_completed=18,
-                models_total=18,
+                current_variant=1,
+                models_completed=cascade_models,
+                models_total=cascade_models,
                 progress_percent=100.0,
-                current_loss=0.35
+                current_loss=validation_loss,
+                result=model_result,
             )
-            
+
             yield progress
-            
-            logger.info(f"Cascade training complete for {request.validation_id}")
+
+            logger.info(
+                f"Cascade training complete for {request.validation_id} "
+                f"(quality={quality:.3f}, collapse_detected={collapse_detected})"
+            )
             
         except Exception as e:
             logger.error(f"TrainCascade failed: {e}")

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +25,7 @@ type OrchestratorService struct {
 	pipelineManager *PipelineManager
 
 	// gRPC clients
-	validationClient validationpb.ValidationServiceClient
+	validationClient validationpb.ValidationEngineClient
 	collapseClient   collapsepb.CollapseServiceClient
 	dataClient       datapb.DataServiceClient
 
@@ -80,7 +82,7 @@ func NewOrchestratorService(workers int, validationAddr, collapseAddr, dataAddr 
 		queue:            NewJobQueue(workers),
 		resourceManager:  NewResourceManager(workers),
 		pipelineManager:  NewPipelineManager(),
-		validationClient: validationpb.NewValidationServiceClient(validationConn),
+		validationClient: validationpb.NewValidationEngineClient(validationConn),
 		collapseClient:   collapsepb.NewCollapseServiceClient(collapseConn),
 		dataClient:       datapb.NewDataServiceClient(dataConn),
 		validationConn:   validationConn,
@@ -303,46 +305,66 @@ func (s *OrchestratorService) executeValidationJob(ctx context.Context, job *Job
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	// Build validation request
-	req := &validationpb.TrainCascadeRequest{
-		JobId:       job.ID,
-		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &validationpb.CascadeConfig{
-			NumEpochs:    5,
-			BatchSize:    32,
-			LearningRate: 0.001,
-			UseMultiGpu:  false,
-			NumGpus:      1,
-			Tiers:        []string{"light", "medium", "heavy"},
-		},
+	// Cascade training is a server-streaming RPC on the canonical
+	// ValidationEngine contract: the sample path comes from a prior diversity
+	// run (Payload["sample_s3_path"]), falling back to the raw dataset path.
+	samplePath := job.Payload["sample_s3_path"]
+	if samplePath == "" {
+		samplePath = job.Payload["dataset_path"]
+	}
+	req := &validationpb.CascadeRequest{
+		DatasetId:    job.Payload["dataset_id"],
+		ValidationId: job.ID,
+		SampleS3Path: samplePath,
 	}
 
-	// Call validation service
-	resp, err := s.validationClient.TrainCascade(ctx, req)
+	stream, err := s.validationClient.TrainCascade(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("validation service error: %w", err)
 	}
 
-	if resp.Status == "failed" {
-		return nil, fmt.Errorf("validation failed: %s", resp.ErrorMessage)
+	// Consume the progress stream; keep the best tier accuracy and whether any
+	// tier tripped collapse detection.
+	var bestAccuracy float64
+	var tiers int
+	collapseDetected := false
+	var lastLoss float64
+	for {
+		progress, rerr := stream.Recv()
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return nil, fmt.Errorf("cascade stream error: %w", rerr)
+		}
+		if e := progress.GetError(); e != nil && e.GetMessage() != "" {
+			return nil, fmt.Errorf("validation failed: %s", e.GetMessage())
+		}
+		if r := progress.GetResult(); r != nil {
+			tiers++
+			lastLoss = r.GetValidationLoss()
+			if acc := 1 - r.GetValidationLoss(); acc > bestAccuracy {
+				bestAccuracy = acc
+			}
+			if r.GetCollapseDetected() {
+				collapseDetected = true
+			}
+		}
 	}
 
-	// Metrics is an optional proto sub-message; guard before dereferencing.
-	if resp.Metrics == nil {
-		return nil, fmt.Errorf("validation response missing metrics")
+	if bestAccuracy < 0 {
+		bestAccuracy = 0
 	}
-
-	// Build result
 	result := map[string]string{
-		"status":           resp.Status,
-		"job_id":           resp.JobId,
-		"average_accuracy": fmt.Sprintf("%.4f", resp.Metrics.AverageAccuracy),
-		"best_accuracy":    fmt.Sprintf("%.4f", resp.Metrics.BestAccuracy),
-		"best_model":       resp.Metrics.BestModel,
+		"status":            "completed",
+		"job_id":            job.ID,
+		"tiers_trained":     fmt.Sprintf("%d", tiers),
+		"best_accuracy":     fmt.Sprintf("%.4f", bestAccuracy),
+		"final_loss":        fmt.Sprintf("%.4f", lastLoss),
+		"collapse_detected": fmt.Sprintf("%t", collapseDetected),
 	}
 
-	log.Printf("Validation job %s completed successfully", job.ID)
+	log.Printf("Validation job %s completed successfully (%d tiers)", job.ID, tiers)
 	return result, nil
 }
 
@@ -451,41 +473,63 @@ func (s *OrchestratorService) executeDiversityAnalysisJob(ctx context.Context, j
 	}
 	defer s.resourceManager.ReleaseResources(job.ID)
 
-	req := &validationpb.AnalyzeDiversityRequest{
-		JobId:       job.ID,
-		DatasetPath: job.Payload["dataset_path"],
-		DataFormat:  job.Payload["data_format"],
-		Config: &validationpb.DiversityConfig{
-			TargetSampleSize:         10000,
-			ConfidenceLevel:          0.95,
-			ChunkSize:                10000,
-			EnableAutoStratification: true,
-			MaxStrata:                10,
-		},
+	req := &validationpb.DiversityRequest{
+		DatasetId: job.Payload["dataset_id"],
+		S3Path:    job.Payload["dataset_path"],
+		Format:    parseDataFormat(job.Payload["data_format"]),
 	}
 
 	resp, err := s.validationClient.AnalyzeDiversity(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("diversity analysis error: %w", err)
 	}
-
-	if resp.Status == "failed" {
-		return nil, fmt.Errorf("diversity analysis failed: %s", resp.ErrorMessage)
+	if e := resp.GetError(); e != nil && e.GetMessage() != "" {
+		return nil, fmt.Errorf("diversity analysis failed: %s", e.GetMessage())
 	}
 
-	// Score is an optional proto sub-message; guard before dereferencing.
-	if resp.Score == nil {
-		return nil, fmt.Errorf("diversity response missing score")
+	metrics := resp.GetMetrics()
+	if metrics == nil {
+		return nil, fmt.Errorf("diversity response missing metrics")
 	}
 
 	result := map[string]string{
-		"status":        resp.Status,
-		"overall_score": fmt.Sprintf("%.2f", resp.Score.OverallScore),
-		"spread_score":  fmt.Sprintf("%.2f", resp.Score.SpreadScore),
-		"balance_score": fmt.Sprintf("%.2f", resp.Score.BalanceScore),
+		"status":              "completed",
+		"sample_s3_path":      resp.GetSampleS3Path(),
+		"sampling_confidence": fmt.Sprintf("%d", resp.GetSamplingConfidence()),
+		"entropy":             fmt.Sprintf("%.4f", metrics.GetEntropy()),
+		"gini_coefficient":    fmt.Sprintf("%.4f", metrics.GetGiniCoefficient()),
+		"cluster_count":       fmt.Sprintf("%d", metrics.GetClusterCount()),
+		"rare_pattern_pct":    fmt.Sprintf("%.4f", metrics.GetRarePatternPercentage()),
+		"outlier_pct":         fmt.Sprintf("%.4f", metrics.GetOutlierPercentage()),
 	}
 
 	return result, nil
+}
+
+// parseDataFormat maps a payload format string to the proto DataFormat enum.
+func parseDataFormat(f string) validationpb.DataFormat {
+	switch strings.ToLower(strings.TrimSpace(f)) {
+	case "csv":
+		return validationpb.DataFormat_CSV
+	case "json":
+		return validationpb.DataFormat_JSON
+	case "jsonl":
+		return validationpb.DataFormat_JSONL
+	case "parquet":
+		return validationpb.DataFormat_PARQUET
+	case "hdf5", "h5":
+		return validationpb.DataFormat_HDF5
+	case "arrow":
+		return validationpb.DataFormat_ARROW
+	case "feather":
+		return validationpb.DataFormat_FEATHER
+	case "excel", "xlsx", "xls":
+		return validationpb.DataFormat_EXCEL
+	case "tsv":
+		return validationpb.DataFormat_TSV
+	default:
+		return validationpb.DataFormat_UNKNOWN_FORMAT
+	}
 }
 
 func (s *OrchestratorService) executeCollapseLocalizationJob(ctx context.Context, job *Job) (map[string]string, error) {
