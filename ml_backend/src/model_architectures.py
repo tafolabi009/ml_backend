@@ -5,9 +5,12 @@ Model Architecture Wrappers
 This module provides proper imports and wrappers for our custom architecture:
 - Temporal Eigenstate Networks (TEN) which replaces legacy Resonance Neural Networks
 
-TEN is a linear-complexity sequence modeling library that replaces standard attention mechanisms 
-with FFT-based and Triton-accelerated spectral eigenstate decomposition. It achieves up to 9.8x 
-speedups over transformers and processes ultra-long sequences in O(T log T) complexity.
+TEN is a linear-complexity sequence modeling library that replaces standard attention
+mechanisms with FFT-based and Triton-accelerated spectral eigenstate decomposition, giving
+O(T log T) complexity instead of the O(T^2) of attention. On an A100 40GB (d=512, 6 layers,
+~42M params) TEN-FFT measures 1.2x faster than a SDPA transformer at T=512, rising to 3.0x
+at T=4096, and stays near-constant at T=8192 where the transformer runs out of memory. See
+the benchmark table in the temporal-eigenstate-networks README for the measured figures.
 
 Key Features:
 - O(T log T) Complexity (vs O(T²) for transformers)
@@ -23,19 +26,23 @@ import torch.nn as nn
 from typing import Optional, Dict, Any
 from loguru import logger
 
-# Try importing the new TEMPORAL EIGENSTATE NETWORK (TEN) package
-try:
-    from ten import TEN
-    TEN_AVAILABLE = True
-    logger.info("Successfully imported genovotechnologies/temporal-eigenstate-networks (ten) package.")
-except ImportError as e:
-    logger.warning(f"Could not import ten package: {e}. Using mock implementations for testing...")
-    TEN_AVAILABLE = False
+# Verified TEN binding. This is deliberately NOT a bare `from ten import TEN`:
+# the distribution name `ten` on PyPI belongs to an unrelated third-party project,
+# so importing it blindly would execute foreign code. See src/ten_runtime.py.
+from src.ten_runtime import (  # noqa: E402
+    TEN,
+    TEN_AVAILABLE,
+    TEN_IMPORT_ERROR,
+    TENUnavailableError,
+    mock_allowed,
+    require_ten,
+)
 
 
-# Mock module to allow tests to run offline when package is not available
+# Mock module to allow tests to run offline when the package is not available.
+# Reachable only when SYNTHOS_ALLOW_MOCK_TEN=1; see ten_runtime.require_ten().
 class MockResonanceModule(torch.nn.Module):
-    """Mock implementation when ten is not installed"""
+    """Mock implementation used only under an explicit test opt-in."""
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.mock = True
@@ -95,7 +102,10 @@ class TENWrapper(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not self.ten_available:
-            # Fallback mock forward pass when package is missing
+            # Fail closed. require_ten() raises unless SYNTHOS_ALLOW_MOCK_TEN=1,
+            # so a score can never be derived from zeros by accident.
+            require_ten("TENWrapper.forward")
+            # Reached only under the explicit test opt-in.
             B = x.shape[0]
             T = x.shape[1] if x.ndim > 1 else 10
             if self.num_classes is not None:

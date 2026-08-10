@@ -56,5 +56,7 @@ prometheus-client>=0.19.0
 # Retries and resilience
 tenacity>=8.2.0
 
-# Custom Architectures (local wheel packages - install separately)
-# Install with: pip install packages/resonance_nn-0.1.0-py3-none-any.whl
+# Custom architecture: Temporal Eigenstate Networks.
+# Install from git, NOT from PyPI. The distribution name `ten` on PyPI belongs to
+# an unrelated third-party project, so `pip install ten` installs foreign code.
+# genovo-ten @ git+https://github.com/genovotechnologies/temporal-eigenstate-networks.git

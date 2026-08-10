@@ -14,14 +14,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from loguru import logger
 
-# Natively import the new Temporal Eigenstate Network (TEN) model
-try:
-    from ten import TEN
-    TEN_AVAILABLE = True
-    logger.info("TEN successfully loaded into Universal Dataset Validator.")
-except ImportError:
-    TEN_AVAILABLE = False
-    logger.warning("TEN package missing. Degrading to mock sequences.")
+# Verified TEN binding — never a bare `from ten import TEN`. The name `ten` on
+# PyPI is an unrelated third-party project. See src/ten_runtime.py.
+from src.ten_runtime import (  # noqa: E402
+    TEN,
+    TEN_AVAILABLE,
+    TEN_IMPORT_ERROR,
+    TENUnavailableError,
+    mock_allowed,
+    require_ten,
+)
 
 
 @dataclass
@@ -189,6 +191,9 @@ class UniversalDatasetValidator:
         # Instantiate TEN model dynamically matching the sequence shape
         embed_dim = sequence.shape[2] if sequence.ndim == 3 else 50257
         
+        # Fail closed: refuse to score unless a verified TEN is present.
+        require_ten("UniversalDatasetValidator sequence evaluation")
+
         # Instantiate real TEN model if available
         if TEN_AVAILABLE:
             model = TEN(

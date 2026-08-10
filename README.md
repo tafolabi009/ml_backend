@@ -97,7 +97,7 @@ Data Loading → Diversity Analysis → Cascade Training → Collapse Detection 
 
 ### Model Architecture: Temporal Eigenstate Networks (TEN)
 
-The platform uses custom **TEN** — FFT-based and Triton-accelerated spectral eigenstate decomposition with **O(T log T) complexity** (no attention mechanism). Up to 9.8x speedups over transformers:
+The platform uses custom **TEN** — FFT-based and Triton-accelerated spectral eigenstate decomposition with **O(T log T) complexity** (no attention mechanism). Measured on an A100 40GB (d=512, 6 layers, ~42M params), TEN-FFT is 1.2x faster than an SDPA transformer at T=512, 2.0x at T=2048 and 3.0x at T=4096, and holds near-constant latency at T=8192 where the transformer OOMs. Full benchmark table in the [temporal-eigenstate-networks](https://github.com/genovotechnologies/temporal-eigenstate-networks) README:
 
 | Size | Parameters | Layers | Context Length | Cascade Role |
 |------|-----------|--------|----------------|--------------|
@@ -138,8 +138,8 @@ A custom fused CUDA kernel (`synthos_kernel/`) replaces PyTorch's multi-step spe
 
 ```bash
 # Clone
-git clone https://github.com/tafolabi009/ml_backend.git
-cd ml_backend
+git clone https://github.com/tafolabi009/synthos-ml-backend.git
+cd synthos-ml-backend
 
 # Configure
 cp .env.example .env
