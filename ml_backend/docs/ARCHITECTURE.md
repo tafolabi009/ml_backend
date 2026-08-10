@@ -19,7 +19,7 @@ The ML Backend is the computational core of Synthos. It runs the validation pipe
 
 ### 1. Temporal Eigenstate Networks — TEN (Primary) — O(T log T)
 
-FFT-based and Triton-accelerated spectral eigenstate decomposition with **no attention mechanism**. Up to 9.8x speedups over transformers:
+FFT-based and Triton-accelerated spectral eigenstate decomposition with **no attention mechanism**. Measured on an A100 40GB (d=512, 6 layers, ~42M params): 1.2x faster than an SDPA transformer at T=512, 2.0x at T=2048, 3.0x at T=4096, and near-constant latency at T=8192 where the transformer OOMs. Benchmark table in the [temporal-eigenstate-networks](https://github.com/genovotechnologies/temporal-eigenstate-networks) README:
 
 | Component | Purpose |
 |-----------|---------|
